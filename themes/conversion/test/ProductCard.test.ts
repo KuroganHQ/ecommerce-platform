@@ -67,3 +67,14 @@ test("loads rail photos after the first one lazily and at low priority", async (
   expect(slide).toContain('fetchpriority="low"');
   expect(slide).toContain('decoding="async"');
 });
+
+test("an eager card loads its main photo eagerly without high fetch priority", async () => {
+  const container = await AstroContainer.create();
+  const html = await container.renderToString(ProductCard, {
+    props: { product: { ...preSwatchCard, images: [image(1)] } as Card, shop, eager: true },
+  });
+  const main = html.match(/<img [^>]*photo-1-640\.jpg[^>]*>/)?.[0];
+  expect(main?.match(/ loading=/g)).toHaveLength(1);
+  expect(main).toContain('loading="eager"');
+  expect(main).toContain('fetchpriority="auto"');
+});

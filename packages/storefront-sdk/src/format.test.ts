@@ -39,6 +39,14 @@ test("image variants", () => {
     fetchpriority: "high",
     loading: "eager",
   });
+  expect(imageAttrs(img, { sizes: "100vw", eager: true })).toMatchObject({
+    loading: "eager",
+    fetchpriority: "auto",
+  });
+  expect(imageAttrs(img, { sizes: "100vw" })).toMatchObject({
+    loading: "lazy",
+    fetchpriority: "auto",
+  });
 });
 
 test("the LCP preload and the img share one sizes value", () => {
