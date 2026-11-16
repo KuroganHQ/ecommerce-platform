@@ -31,10 +31,7 @@ const href = productHref(shop, p.slug);
 // Defaults keep the published theme rendering against an API rolled back to before swatches.
 const { images = [], swatches = [] } = p;
 const [main, hover] = images.map((i) => (wide ? capped(i, 1280) : cardImage(i)));
-// Attributes are merged here: Astro renders a spread and a repeated attribute both, and HTML
-// keeps the first.
-const mainAttrs = main && imageAttrs(main, { sizes, priority, width: 360 });
-const img = mainAttrs && { ...mainAttrs, loading: eager ? ("eager" as const) : mainAttrs.loading };
+const img = main && imageAttrs(main, { sizes, priority, eager, width: 360 });
 const slides = (photoRail && images.length > 1 ? images.slice(0, 5) : []).map((s, i) =>
   i === 0 && img
     ? img
