@@ -45,8 +45,9 @@ export function imageUrl(img: Image, width: number): string {
 
 /**
  * Attributes for an `<img>`: AVIF `srcset` (every current browser decodes AVIF; `src` is the
- * JPEG/PNG fallback), explicit dimensions (no CLS), lazy unless `eager` or `priority` (the LCP image, which also gets fetchpriority=high). `sizes`
- * must describe the real slot: a loose guess makes the browser pick a 2-4× heavier variant.
+ * JPEG/PNG fallback), explicit dimensions (no CLS), lazy unless `eager` or `priority` (the LCP
+ * image, which also gets fetchpriority=high). `sizes` must describe the real slot: a loose guess
+ * makes the browser pick a 2-4× heavier variant.
  */
 export function imageAttrs(
   img: Image,

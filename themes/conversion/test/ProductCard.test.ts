@@ -30,9 +30,11 @@ const preSwatchCard = {
   badges: [],
 };
 
-async function render(product: object) {
+async function render(product: object, props: { eager?: boolean } = {}) {
   const container = await AstroContainer.create();
-  return container.renderToString(ProductCard, { props: { product: product as Card, shop } });
+  return container.renderToString(ProductCard, {
+    props: { product: product as Card, shop, ...props },
+  });
 }
 
 test("renders a card from the pre-swatch API shape without a colour row", async () => {
@@ -69,10 +71,7 @@ test("loads rail photos after the first one lazily and at low priority", async (
 });
 
 test("an eager card loads its main photo eagerly without high fetch priority", async () => {
-  const container = await AstroContainer.create();
-  const html = await container.renderToString(ProductCard, {
-    props: { product: { ...preSwatchCard, images: [image(1)] } as Card, shop, eager: true },
-  });
+  const html = await render({ ...preSwatchCard, images: [image(1)] }, { eager: true });
   const main = html.match(/<img [^>]*photo-1-640\.jpg[^>]*>/)?.[0];
   expect(main?.match(/ loading=/g)).toHaveLength(1);
   expect(main).toContain('loading="eager"');
