@@ -211,12 +211,15 @@ function weight(s: string): number | null {
   return n;
 }
 
-/** Option names and value names without blank locales (the API rejects empty entries). */
 function compactOptions(options: readonly ProductOption[]): ProductOption[] {
   return options.map((o) => ({
     ...o,
     name_i18n: compactI18n(o.name_i18n),
-    values: o.values.map((v) => ({ ...v, name_i18n: compactI18n(v.name_i18n) })),
+    values: o.values.map(({ swatch, ...v }) => ({
+      ...v,
+      name_i18n: compactI18n(v.name_i18n),
+      ...(swatch?.trim() ? { swatch: swatch.trim() } : {}),
+    })),
   }));
 }
 

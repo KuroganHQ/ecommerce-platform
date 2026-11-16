@@ -1222,7 +1222,8 @@ export const cs: Dictionary = {
     invalid_unit: "Jednotku a obsah vyplňte společně (obsah nejvýše na 4 desetinná místa).",
     invalid_variants:
       "Zkontrolujte varianty: aktivní produkt potřebuje alespoň jednu, SKU musí být jedinečné.",
-    invalid_options: "Každá vlastnost potřebuje název a alespoň jednu hodnotu.",
+    invalid_options:
+      "Každá vlastnost potřebuje název a alespoň jednu hodnotu a barva se zapisuje jako #rrggbb.",
     invalid_weight: "Hmotnost se zadává v celých gramech (0 až 10 000 000).",
     too_many_variants: "Nejvýše 500 variant: snižte počet hodnot vlastností.",
     invalid_parameter_value: "Číselný parametr má hodnotu, která není číslo.",
@@ -1478,6 +1479,9 @@ export const cs: Dictionary = {
     weight: "Hmotnost (g)",
     isDefault: "Výchozí",
     invalidEan: "Neplatný EAN",
+    swatch: "Barva",
+    pickSwatch: "Vybrat barvu",
+    invalidSwatch: "Zadejte #rrggbb",
     assigned: "Přiřazené kategorie",
     noCategories: "Zatím neexistují žádné kategorie. Vytvořte je v sekci Kategorie.",
     parameter: "Parametr",

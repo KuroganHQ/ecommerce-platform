@@ -146,6 +146,7 @@ export default function ProductEditor() {
   const [draft, setDraft] = createStore<ProductDraft>(emptyDraft());
   const [loaded, setLoaded] = createSignal<string | null>(null);
   const [saveError, setSaveError] = createSignal<string>();
+  const [optionsError, setOptionsError] = createSignal<string>();
   const [confirmDelete, setConfirmDelete] = createSignal(false);
   const [newCountry, setNewCountry] = createSignal("");
 
@@ -228,6 +229,7 @@ export default function ProductEditor() {
       if (!alive || route !== params.id || JSON.stringify(base) !== JSON.stringify(tenantKey()))
         return;
       setSaveError(undefined);
+      setOptionsError(undefined);
       load(p);
       showToast({
         title: created ? t("editor.created") : t("common.saved"),
@@ -238,6 +240,9 @@ export default function ProductEditor() {
     onError: (err) => {
       if (!alive) return;
       setSaveError(errorMessage(err));
+      setOptionsError(
+        err instanceof ApiError && err.code === "invalid_options" ? errorMessage(err) : undefined,
+      );
       document.getElementById("save-error")?.focus();
     },
   }));
@@ -463,6 +468,7 @@ export default function ProductEditor() {
           options={draft.options}
           variants={draft.variants}
           skuBase={skuBase()}
+          error={optionsError()}
           onOptions={(o) => setDraft("options", reconcile(o))}
           onVariants={(v) => setDraft("variants", reconcile(v))}
         />

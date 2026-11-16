@@ -1224,7 +1224,8 @@ export const sk: Dictionary = {
     invalid_unit: "Jednotku a obsah vyplňte spoločne (obsah najviac na 4 desatinné miesta).",
     invalid_variants:
       "Skontrolujte varianty: aktívny produkt potrebuje aspoň jednu, SKU musia byť jedinečné.",
-    invalid_options: "Každá vlastnosť potrebuje názov a aspoň jednu hodnotu.",
+    invalid_options:
+      "Každá vlastnosť potrebuje názov a aspoň jednu hodnotu a farba sa zapisuje ako #rrggbb.",
     invalid_weight: "Hmotnosť sa zadáva v celých gramoch (0 až 10 000 000).",
     too_many_variants: "Najviac 500 variantov: znížte počet hodnôt vlastností.",
     invalid_parameter_value: "Číselný parameter má hodnotu, ktorá nie je číslo.",
@@ -1480,6 +1481,9 @@ export const sk: Dictionary = {
     weight: "Hmotnosť (g)",
     isDefault: "Predvolený",
     invalidEan: "Neplatný EAN",
+    swatch: "Farba",
+    pickSwatch: "Vybrať farbu",
+    invalidSwatch: "Zadajte #rrggbb",
     assigned: "Priradené kategórie",
     noCategories: "Zatiaľ neexistujú žiadne kategórie. Vytvorte ich v sekcii Kategórie.",
     parameter: "Parameter",
