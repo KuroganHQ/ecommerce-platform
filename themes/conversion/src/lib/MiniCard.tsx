@@ -1,11 +1,13 @@
 import { imageUrl, type Messages, t } from "@platform/storefront-sdk/format";
 import type { ProductCard } from "@platform/storefront-sdk/types";
+import { For, Show } from "solid-js";
 
 /**
  * Compact product card for islands (cart cross-sell, "for you", recently viewed): photo, name,
- * current price. The full card (`ProductCard.astro`) stays server-rendered; this one only lives
- * in lazily loaded chunks. No reduction display: a strikethrough needs the Omnibus reference
- * (A18), which the full card shows.
+ * current price, and colours when the caller passes the `product.colors` label. The full card
+ * (`ProductCard.astro`) stays server-rendered; this one only lives in lazily loaded chunks. No
+ * reduction display: a strikethrough needs the Omnibus reference (A18), which the full card
+ * shows. One photo, no swipe: inside a horizontal rail a photo swipe fights the rail's scroll.
  */
 export default function MiniCard(props: {
   product: ProductCard;
@@ -43,6 +45,30 @@ export default function MiniCard(props: {
           ? t(props.labels, "product.price_from", { price: p().price.formatted })
           : p().price.formatted}
       </span>
+      <Show when={props.labels["product.colors"] && (p().swatches ?? []).length > 0}>
+        <span class="mt-1.5 flex items-center">
+          <span class="sr-only">
+            {t(props.labels, "product.colors", {
+              names: p().swatches.map((s) => s.name).join(", "),
+            })}
+          </span>
+          <span class="flex items-center gap-1.5" aria-hidden="true">
+            <For each={p().swatches.slice(0, 4)}>
+              {(s) => (
+                <svg
+                  class="size-4 rounded-full border border-black/10 ring-1 ring-white"
+                  viewBox="0 0 16 16"
+                >
+                  <circle cx="8" cy="8" r="8" fill={s.color} />
+                </svg>
+              )}
+            </For>
+            <Show when={p().swatches.length > 4}>
+              <span class="text-[0.8125rem] text-muted-foreground">+{p().swatches.length - 4}</span>
+            </Show>
+          </span>
+        </span>
+      </Show>
     </a>
   );
 }
