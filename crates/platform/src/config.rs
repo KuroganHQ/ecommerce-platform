@@ -343,6 +343,8 @@ pub struct StorefrontConfig {
     /// `EDGE_PURGE_TOKEN`: the edge's own purge token (distinct service token, A7).
     pub edge_purge_token: String,
     pub experiments_secret: Option<String>,
+    /// `ACCOUNT_DOMAIN`: the registrable domain of customer account origins (A1).
+    pub account_domain: Option<String>,
 }
 
 impl StorefrontConfig {
@@ -380,12 +382,14 @@ impl StorefrontConfig {
                 reason: "must be at least 32 characters".into(),
             });
         }
+        let account_domain = get(lookup, "ACCOUNT_DOMAIN");
         Ok(Self {
             scheme,
             port,
             edge_purge_url,
             edge_purge_token,
             experiments_secret,
+            account_domain,
         })
     }
 }

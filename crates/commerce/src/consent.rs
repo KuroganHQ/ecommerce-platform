@@ -223,6 +223,55 @@ pub async fn record(
     .await
 }
 
+/// A signed-in customer's email preferences, saved on the account origin (source `account`).
+/// Cookie purposes belong to the browser, not the account, and are refused.
+pub async fn record_account(
+    tx: &mut TenantTx,
+    customer_id: Uuid,
+    choice: &ConsentChoice,
+    ip_hash: Option<&[u8]>,
+) -> Result<(), Error> {
+    let p = choice.purposes;
+    if p.analytics.is_some() || p.ads.is_some() || p.personalization.is_some() {
+        return Err(invalid(
+            "cookie_purpose",
+            "only email_marketing and review_invites are saved on the account",
+        ));
+    }
+    if !valid_text_version(&choice.text_version) {
+        return Err(invalid(
+            "invalid_text_version",
+            "text_version must be 1-32 of [A-Za-z0-9_-]",
+        ));
+    }
+    let choices = p.choices();
+    if choices.is_empty() {
+        return Err(invalid("no_purposes", "choose at least one purpose"));
+    }
+    insert(
+        tx,
+        &Subject::Customer(customer_id),
+        &choices,
+        &choice.text_version,
+        "account",
+        ip_hash,
+    )
+    .await
+}
+
+/// The email purposes of a customer (the account origin's preferences page).
+pub async fn account_state(tx: &mut TenantTx, customer_id: Uuid) -> Result<ConsentState, Error> {
+    let all = state(tx, &Subject::Customer(customer_id)).await?;
+    Ok(ConsentState {
+        purposes: Purposes {
+            email_marketing: all.purposes.email_marketing,
+            review_invites: all.purposes.review_invites,
+            ..Purposes::default()
+        },
+        text_version: all.text_version,
+    })
+}
+
 /// Records a choice made through a platform flow rather than a consent form: the newsletter
 /// double opt-in (`double_opt_in`), an unsubscribe link (`unsubscribe`), staff acting on a
 /// request (`admin`) or a spam complaint (`complaint`). `source` is `^[a-z_]{1,32}$`.

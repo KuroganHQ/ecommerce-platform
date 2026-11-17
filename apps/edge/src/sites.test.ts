@@ -59,6 +59,7 @@ test("the API resolver maps the resolve response and caches nothing on errors", 
   };
   const r = new ApiResolver("http://api:8000", "service-token", upstream);
   expect(await r.resolve("demo-sk.localhost")).toEqual({
+    kind: "shop",
     tenant_id: "t1",
     market_id: "m-sk",
     locale: "sk",
@@ -80,6 +81,30 @@ test("the API resolver maps the resolve response and caches nothing on errors", 
   const cached = new CachedResolver(r);
   await expect(cached.resolve("down.localhost")).rejects.toThrow();
   expect(seen.filter((s) => s.includes("down.localhost")).length).toBe(2);
+});
+
+test("the API resolver maps an account origin to its shop host (A1)", async () => {
+  const r = new ApiResolver("http://api:8000", "service-token", async () =>
+    Response.json({
+      hostname: "sk--demo.accounts.localhost",
+      kind: "account",
+      shop_hostname: "demo-sk.localhost",
+      tenant_id: "t1",
+      market_id: "m-sk",
+      default_locale: "sk",
+      locales: ["sk"],
+      storefront_token: "sf_x",
+      theme_artifact: null,
+      retained_artifacts: [],
+      checkout_artifact: null,
+      checkout_origins: [],
+    }),
+  );
+  expect(await r.resolve("sk--demo.accounts.localhost")).toMatchObject({
+    kind: "account",
+    shop_host: "demo-sk.localhost",
+    market_id: "m-sk",
+  });
 });
 
 test("the API resolver maps the running experiment (SHOP-96)", async () => {

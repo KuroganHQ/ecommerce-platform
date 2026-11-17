@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { expect, test } from "@playwright/test";
 import { run, sql } from "../admin/support";
 import {
+  ACCOUNT,
   acceptAndPlace,
   CZ,
   checkoutOf,
@@ -159,12 +160,16 @@ test("checkout waits for the payment save before accepting an order", async ({ b
   }
 });
 
-for (const path of ["/account", "/consent", "/withdraw"]) {
+for (const [origin, path] of [
+  [ACCOUNT, "/account"],
+  [checkoutOf(CZ), "/consent"],
+  [checkoutOf(CZ), "/withdraw"],
+] as const) {
   test(`${path} controls wait for hydration`, async ({ browser }) => {
     const page = await newPage(browser);
     const release = await deferHydration(page);
     try {
-      await page.goto(`${checkoutOf(CZ)}${path}`, { waitUntil: "commit" });
+      await page.goto(`${origin}${path}`, { waitUntil: "commit" });
       const controls = page.locator("main input:visible, main button:visible");
       await expect(controls.first()).toBeVisible();
       for (const control of await controls.all()) await expect(control).toBeDisabled();
@@ -183,7 +188,7 @@ test("email-link confirmation waits for its event handler before accepting click
   const page = await newPage(browser);
   const release = await deferHydration(page);
   try {
-    await page.goto(`${checkoutOf(CZ)}/account/verify?token=${"a".repeat(64)}`, {
+    await page.goto(`${ACCOUNT}/account/verify?token=${"a".repeat(64)}`, {
       waitUntil: "commit",
     });
     const confirm = page.getByRole("button", { name: "Přihlásit se", exact: true });

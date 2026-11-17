@@ -1,7 +1,7 @@
 //! Tenancy, markets, audit and idempotency against a real Postgres, as the runtime role.
 
 use commerce::markets::{self, NewMarket, TaxMode};
-use commerce::tenancy::{self, CheckoutMode, CheckoutOriginPolicy, NewTenant, Role};
+use commerce::tenancy::{self, CheckoutMode, CheckoutOriginPolicy, HostKind, NewTenant, Role};
 use commerce::{audit, idempotency};
 use platform::Error;
 use platform::db::tenant_tx;
@@ -886,4 +886,142 @@ async fn migration_backfills_populated_domains_isolated(db: PgPool) {
         "history = 'platform_never_reassigned'",
     )
     .await;
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn account_host_resolves_market(db: PgPool) {
+    let runtime = testkit::runtime_pool(&db, 2).await;
+    let alpha = tenancy::create_tenant(&runtime, &owner("alpha"))
+        .await
+        .unwrap();
+    let mut tx = tenant_tx(&runtime, alpha.tenant_id).await.unwrap();
+    let sk = markets::create(&mut tx, "test", &sk()).await.unwrap();
+    tx.commit().await.unwrap();
+    tenancy::add_domain(&runtime, "alpha", "alpha-sk.localhost", Some("sk"), true)
+        .await
+        .unwrap();
+    tenancy::ensure_account_domain(&runtime, "accounts.localhost")
+        .await
+        .unwrap();
+
+    let shop = tenancy::resolve_host(&runtime, "alpha.localhost")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(shop.kind, HostKind::Shop);
+    assert_eq!(shop.shop_hostname, "alpha.localhost");
+
+    let cz = tenancy::resolve_host(&runtime, "Alpha.Accounts.Localhost:8080")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(cz.kind, HostKind::Account);
+    assert_eq!(cz.hostname, "alpha.accounts.localhost");
+    assert_eq!(cz.shop_hostname, "alpha.localhost");
+    assert_eq!(
+        (cz.tenant_id, cz.market_id, cz.market_code.as_str()),
+        (alpha.tenant_id, alpha.market_id, "cz")
+    );
+    assert_eq!(cz.storefront_token, shop.storefront_token);
+
+    let other = tenancy::resolve_host(&runtime, "sk--alpha.accounts.localhost")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(other.kind, HostKind::Account);
+    assert_eq!((other.market_id, other.currency.as_str()), (sk.id, "EUR"));
+    assert_eq!(other.shop_hostname, "alpha-sk.localhost");
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn unknown_account_label_is_not_found(db: PgPool) {
+    let runtime = testkit::runtime_pool(&db, 2).await;
+    tenancy::create_tenant(&runtime, &owner("alpha"))
+        .await
+        .unwrap();
+    let mut tx = tenant_tx(
+        &runtime,
+        tenancy::create_tenant(&runtime, &owner("beta"))
+            .await
+            .unwrap()
+            .tenant_id,
+    )
+    .await
+    .unwrap();
+    markets::create(&mut tx, "test", &sk()).await.unwrap();
+    tx.commit().await.unwrap();
+    tenancy::ensure_account_domain(&runtime, "accounts.localhost")
+        .await
+        .unwrap();
+    for host in [
+        "accounts.localhost",
+        "nope.accounts.localhost",
+        "cz--alpha.accounts.localhost",
+        "de--alpha.accounts.localhost",
+        "sk--beta.accounts.localhost",
+        "x.alpha.accounts.localhost",
+        "checkout.alpha.accounts.localhost",
+        "alpha.other.localhost",
+    ] {
+        assert!(
+            tenancy::resolve_host(&runtime, host)
+                .await
+                .unwrap()
+                .is_none(),
+            "{host}"
+        );
+    }
+    sqlx::query("UPDATE platform.tenants SET status = 'suspended' WHERE slug = 'alpha'")
+        .execute(&runtime)
+        .await
+        .unwrap();
+    assert!(
+        tenancy::resolve_host(&runtime, "alpha.accounts.localhost")
+            .await
+            .unwrap()
+            .is_none()
+    );
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn account_domain_start_refuses_covering_domain(db: PgPool) {
+    let runtime = testkit::runtime_pool(&db, 2).await;
+    tenancy::create_tenant(&runtime, &owner("alpha"))
+        .await
+        .unwrap();
+    tenancy::ensure_account_domain(&runtime, "accounts.localhost")
+        .await
+        .unwrap();
+    tenancy::ensure_account_domain(&runtime, "accounts.localhost")
+        .await
+        .unwrap();
+    assert_eq!(
+        tenancy::ensure_account_domain(&runtime, "alpha.localhost")
+            .await
+            .unwrap_err()
+            .code(),
+        "account_domain_covers_shop"
+    );
+    assert!(
+        tenancy::ensure_account_domain(&runtime, "Not A Domain")
+            .await
+            .is_err()
+    );
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn market_whose_account_label_is_too_long_is_refused(db: PgPool) {
+    let runtime = testkit::runtime_pool(&db, 2).await;
+    let slug: &'static str = "a".repeat(60).leak();
+    let t = tenancy::create_tenant(&runtime, &owner(slug))
+        .await
+        .unwrap();
+    let mut tx = tenant_tx(&runtime, t.tenant_id).await.unwrap();
+    let err = markets::create(&mut tx, "test", &sk()).await.unwrap_err();
+    assert_eq!(err.code(), "account_label_too_long");
+    assert_eq!(tenancy::account_label(slug, "sk", true).unwrap(), slug);
+    assert_eq!(
+        tenancy::account_label("demo", "sk", false).unwrap(),
+        "sk--demo"
+    );
 }

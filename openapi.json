@@ -18416,6 +18416,165 @@
         }
       }
     },
+    "/storefront/v1/customer/consent": {
+      "get": {
+        "tags": [
+          "storefront"
+        ],
+        "summary": "The signed-in customer's email preferences (account origin, A1, A20).",
+        "operationId": "get_account_consent",
+        "parameters": [
+          {
+            "name": "X-Storefront-Token",
+            "in": "header",
+            "description": "The tenant's public storefront token.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Market",
+            "in": "header",
+            "description": "Market id resolved from the shop host by the edge.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-Locale",
+            "in": "header",
+            "description": "Locale hint (one of the market's locales).",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "X-Customer-Session",
+            "in": "header",
+            "description": "Session token from the checkout origin's `__Host-sid` cookie (set by the edge).",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsentState"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "storefront"
+        ],
+        "summary": "Saves `email_marketing` and `review_invites` for the signed-in customer (source `account`;\na body `source` is ignored). Any other purpose is refused.",
+        "operationId": "post_account_consent",
+        "parameters": [
+          {
+            "name": "X-Storefront-Token",
+            "in": "header",
+            "description": "The tenant's public storefront token.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Market",
+            "in": "header",
+            "description": "Market id resolved from the shop host by the edge.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-Locale",
+            "in": "header",
+            "description": "Locale hint (one of the market's locales).",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "X-Customer-Session",
+            "in": "header",
+            "description": "Session token from the checkout origin's `__Host-sid` cookie (set by the edge).",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConsentChoice"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsentState"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/storefront/v1/customer/login": {
       "post": {
         "tags": [
@@ -30098,6 +30257,14 @@
           }
         }
       },
+      "HostKind": {
+        "type": "string",
+        "description": "Which origin a resolved host is.",
+        "enum": [
+          "shop",
+          "account"
+        ]
+      },
       "Hypothesis": {
         "type": "object",
         "required": [
@@ -36073,6 +36240,8 @@
         "description": "What the edge needs to serve a hostname (spec §5.1, `GET /internal/v1/resolve`).",
         "required": [
           "hostname",
+          "kind",
+          "shop_hostname",
           "tenant_id",
           "tenant_slug",
           "market_id",
@@ -36126,6 +36295,9 @@
           "hostname": {
             "type": "string"
           },
+          "kind": {
+            "$ref": "#/components/schemas/HostKind"
+          },
           "locales": {
             "type": "array",
             "items": {
@@ -36145,6 +36317,10 @@
               "type": "string"
             },
             "description": "Earlier artifacts whose `/_astro/*` assets stay served (A22)."
+          },
+          "shop_hostname": {
+            "type": "string",
+            "description": "The market's shop host: `hostname` itself for a shop, the market's primary domain for\nan account origin."
           },
           "storefront_token": {
             "type": "string",
@@ -37654,6 +37830,7 @@
           "base_path",
           "locales",
           "checkout_url",
+          "account_url",
           "currencies",
           "markets",
           "menus",
@@ -37666,6 +37843,10 @@
           "cache"
         ],
         "properties": {
+          "account_url": {
+            "type": "string",
+            "description": "The market's account origin (`https://<label>.<account domain>`, A1): sign-in and the\ncustomer account."
+          },
           "base_path": {
             "type": "string",
             "description": "`\"\"` in the market's default locale, else `/<locale>` (spec §9.1). Page-model hrefs\nalready carry it; themes prefix the links they build themselves (`/search`,\n`/p/<slug>`, `/_p/public/*`)."

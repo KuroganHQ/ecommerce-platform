@@ -32,7 +32,7 @@ export function workerResponseHeaders(from: Headers): Headers {
   return out;
 }
 
-export type CspProfile = "theme" | "checkout";
+export type CspProfile = "theme" | "checkout" | "account";
 
 /**
  * Edge-owned CSP (spec §12.3 safety, A26). `scriptHashes` are the hashes of the unavoidable
@@ -78,6 +78,8 @@ export function contentSecurityPolicy(
       `form-action 'self'${opts.checkoutOrigin ? ` ${opts.checkoutOrigin}` : ""}`,
     ].join("; ");
   }
+  if (profile === "account")
+    return [...common, "connect-src 'self'", "frame-src 'none'", "form-action 'self'"].join("; ");
   const widget = opts.widgetOrigin ?? "https://widget.packeta.com";
   const stripeScript = opts.stripe ? " https://js.stripe.com https://*.js.stripe.com" : "";
   return [

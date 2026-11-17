@@ -30,6 +30,9 @@ export const FRESH_SK_HTTPS = new URL(
   `https://demo-fresh-sk.localhost:${process.env.HTTPS_PORT ?? "8443"}`,
 ).origin;
 export const checkoutOf = (shop: string) => shop.replace("://", "://checkout.");
+/** The demo shop's account origins (SHOP-95, A1): `<slug>.<ACCOUNT_DOMAIN>`, `<market>--<slug>.…`. */
+export const ACCOUNT = `http://demo.accounts.localhost:${port}`;
+export const ACCOUNT_SK = `http://sk--demo.accounts.localhost:${port}`;
 
 export const RESTARTED =
   "Pokladna byla mezitím spuštěna znovu nebo vypršela. Pokračujte s aktuálním košíkem.";

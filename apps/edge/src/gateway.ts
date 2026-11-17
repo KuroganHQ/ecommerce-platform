@@ -140,8 +140,9 @@ const CART_OPS: { method: string; path: RegExp }[] = [
   { method: "DELETE", path: /^\/coupons\/[A-Za-z0-9_-]{1,64}$/ },
 ];
 
-/** Customer account operations on the checkout origin (`/_p/account/*`, WP9, A4, A5). */
 const ACCOUNT_OPS: { method: string; path: RegExp }[] = [
+  { method: "GET", path: /^\/consent$/ },
+  { method: "POST", path: /^\/consent$/ },
   { method: "POST", path: /^\/orders\/[0-9a-f-]{36}\/withdrawal$/ },
   { method: "POST", path: /^\/magic-link$/ },
   { method: "POST", path: /^\/magic-link\/consume$/ },
@@ -183,6 +184,8 @@ const ORDER_OPS: { method: string; path: RegExp }[] = [
 ];
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const ACCOUNT_PAGE_RE =
+  /^\/account(?:\/(?:addresses|security|verify|consent)|\/orders\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})?$/;
 /** Where the fake pay page may send the customer back to: the order page only. */
 const ORDER_PAGE_RE = /^\/o\/[0-9a-f]{64}$/;
 
@@ -723,16 +726,22 @@ export function createGateway(opts: GatewayOptions) {
 
   // --- platform routes (/_p/*) ---------------------------------------------------------------
 
+  // Local dev also serves the shops over https (Caddy tls internal) while the canonical scheme
+  // stays http; production is https-only, so this only ever widens http → https.
+  const isOrigin = (origin: string, host: string, port: string) =>
+    origin === `${scheme}://${host}${port}` ||
+    (scheme === "http" && origin === `https://${host}${port}`);
+
   function sameOrigin(req: Request, host: string, port: string) {
     const origin = req.headers.get("origin");
-    // Local dev also serves the shops over https (Caddy tls internal) while the canonical scheme
-    // stays http; production is https-only, so this only ever widens http → https.
-    if (origin)
-      return (
-        origin === `${scheme}://${host}${port}` ||
-        (scheme === "http" && origin === `https://${host}${port}`)
-      );
+    if (origin) return isOrigin(origin, host, port);
     return req.headers.get("sec-fetch-site") === "same-origin";
+  }
+
+  function sameOriginFetch(req: Request, host: string, port: string) {
+    if (req.headers.get("sec-fetch-site") !== "same-origin") return false;
+    const origin = req.headers.get("origin");
+    return origin === null || isOrigin(origin, host, port);
   }
 
   async function readJsonBody(req: Request, max: number): Promise<ArrayBuffer | Response> {
@@ -755,11 +764,6 @@ export function createGateway(opts: GatewayOptions) {
     return v && TOKEN_RE.test(v) ? v : undefined;
   };
 
-  /**
-   * `/_p/account/*` on the checkout origin → `/storefront/v1/customer/*`. Same-origin JSON only
-   * (CSRF, §14); the session, checkout cart and consent subject go to the API as headers, and
-   * only the edge ever sees the session token (it comes back in `x-session-token`).
-   */
   async function accountProxy(
     site: Site,
     req: Request,
@@ -767,12 +771,14 @@ export function createGateway(opts: GatewayOptions) {
     host: string,
     port: string,
     clientIp: string | undefined,
+    accountOrigin = false,
   ): Promise<Response> {
     const op = ACCOUNT_OPS.find((o) => o.method === req.method && o.path.test(rest));
     if (!op) return problem(404, "not_found", "unknown account operation");
-    // CSRF (§14): SameSite=Lax plus a same-origin check on every state-changing call.
-    if (req.method !== "GET" && !sameOrigin(req, host, port))
-      return problem(403, "cross_origin", "cross-origin request");
+    const allowed = accountOrigin
+      ? sameOriginFetch(req, host, port)
+      : req.method === "GET" || sameOrigin(req, host, port);
+    if (!allowed) return problem(403, "cross_origin", "cross-origin request");
     let body: ArrayBuffer | undefined;
     if (req.method === "POST" || req.method === "PUT") {
       const b = await readJsonBody(req, MAX_JSON_BODY);
@@ -780,8 +786,8 @@ export function createGateway(opts: GatewayOptions) {
       body = b;
     }
     const session = capabilityCookie(req, SESSION_COOKIE);
-    const cart = capabilityCookie(req, CHECKOUT_CART_COOKIE);
-    const subject = readCookie(req.headers, CONSENT_ID_COOKIE);
+    const cart = accountOrigin ? undefined : capabilityCookie(req, CHECKOUT_CART_COOKIE);
+    const subject = accountOrigin ? undefined : readCookie(req.headers, CONSENT_ID_COOKIE);
     const res = await upstream(
       new Request(`${opts.apiOrigin}/storefront/v1/customer${rest}`, {
         method: req.method,
@@ -2137,6 +2143,50 @@ ${
     return new Response(req.method === "HEAD" ? null : r.body, { status: r.status, headers });
   }
 
+  async function account(
+    site: Site,
+    req: Request,
+    url: URL,
+    host: string,
+    port: string,
+    clientIp: string | undefined,
+  ): Promise<Response> {
+    const p = url.pathname;
+    if (p.startsWith("/_p/account/"))
+      return accountProxy(site, req, p.slice("/_p/account".length), host, port, clientIp, true);
+    if (p === "/_p/tokens.css") return tokensCss(site);
+    if (p.startsWith("/_checkout/")) return checkoutAsset(site, req, p);
+    if (p === "/")
+      return new Response(null, {
+        status: 303,
+        headers: { location: "/account", "cache-control": "no-store" },
+      });
+    if (!ACCOUNT_PAGE_RE.test(p)) return text(404, "Not found");
+    if (req.method !== "GET" && req.method !== "HEAD")
+      return text(405, "Method not allowed", { allow: "GET, HEAD" });
+    const checkoutArtifact = site.checkout_artifact ?? opts.checkoutArtifact;
+    if (!checkoutArtifact)
+      return text(503, "Accounts are not available yet", { "retry-after": "60" });
+    const m = await manifest(checkoutArtifact);
+    if (m.kind !== "checkout") throw new Error(`artifact ${checkoutArtifact} is not a checkout`);
+    const r = await render(checkoutArtifact, normalizeUrl(url), site, {
+      sessionToken: capabilityCookie(req, SESSION_COOKIE),
+    });
+    const headers = r.headers;
+    const csp = contentSecurityPolicy("account", {
+      scriptHashes: m.csp.script_hashes,
+      styleHashes: m.csp.style_hashes,
+    });
+    for (const [k, v] of Object.entries(securityHeaders("account", csp))) headers.set(k, v);
+    headers.set("cache-control", "no-store");
+    headers.set("x-frame-options", "DENY");
+    headers.set(
+      "referrer-policy",
+      p === "/account/verify" ? "no-referrer" : PLATFORM_REFERRER_POLICY,
+    );
+    return new Response(req.method === "HEAD" ? null : r.body, { status: r.status, headers });
+  }
+
   async function handle(request: Request): Promise<Response> {
     if (request.headers.get("service-worker") === "script")
       return new Response(null, { status: 403, headers: { "cache-control": "no-store" } });
@@ -2163,6 +2213,15 @@ ${
     // values.
     const requestScheme =
       scheme === "http" && request.headers.get("x-forwarded-proto") === "https" ? "https" : scheme;
+    if (resolved.kind === "account") {
+      if (origin.kind !== "shop") return text(404, "Unknown shop");
+      const site: Site = {
+        ...resolved,
+        clientIp,
+        shopOrigin: new URL(`${requestScheme}://${resolved.shop_host}${port}`).origin,
+      };
+      return account(site, req, publicUrl, host, port, clientIp);
+    }
     // A per-request copy: the resolver's cached object is shared between requests.
     const site: Site = {
       ...resolved,

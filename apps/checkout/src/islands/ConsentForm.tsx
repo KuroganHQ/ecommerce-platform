@@ -9,22 +9,19 @@ import { problemText } from "./SignIn";
 type Purpose = keyof ConsentPurposes;
 
 /**
- * Consent preferences (A20) on the checkout origin. Posts the same contract as the theme's
- * banner (`/_p/consent`, `source: "preferences"`); email purposes only for signed-in customers.
+ * Consent preferences (A20): the theme banner's contract (`source: "preferences"`) posted to
+ * `endpoint`, `/_p/consent` on the checkout origin or `/_p/account/consent` (email purposes
+ * only) on the account origin.
  */
 export default function ConsentForm(props: {
   m: Record<string, string>;
   purposes: ConsentPurposes;
   textVersion: string;
-  signedIn: boolean;
+  shown: Purpose[];
+  endpoint: string;
 }) {
   const m = props.m;
-  const shown: Purpose[] = [
-    "analytics",
-    "ads",
-    "personalization",
-    ...(props.signedIn ? (["email_marketing", "review_invites"] as const) : []),
-  ];
+  const shown = props.shown;
   const [values, setValues] = createSignal<Record<string, boolean>>(
     Object.fromEntries(shown.map((p) => [p, props.purposes[p] === true])),
   );
@@ -37,7 +34,7 @@ export default function ConsentForm(props: {
     setBusy(true);
     setStatus("");
     setError("");
-    const r = await call("POST", "/_p/consent", {
+    const r = await call("POST", props.endpoint, {
       purposes: values(),
       text_version: props.textVersion,
       source: "preferences",

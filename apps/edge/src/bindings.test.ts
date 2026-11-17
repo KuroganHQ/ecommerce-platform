@@ -29,6 +29,13 @@ test("review links: the checkout reads the invitation, nobody submits through a 
   expect(can(STOREFRONT_OPERATIONS, "GET", "/reviews/invitation")).toBe(false);
 });
 
+test("account pages read the customer's email preferences, never write them", () => {
+  const can = (method: string, path: string) =>
+    CHECKOUT_OPERATIONS.some((o) => o.method === method && o.path.test(path));
+  expect(can("GET", "/customer/consent")).toBe(true);
+  expect(can("POST", "/customer/consent")).toBe(false);
+});
+
 const site = (tenant: string) =>
   ({
     tenant_id: tenant,

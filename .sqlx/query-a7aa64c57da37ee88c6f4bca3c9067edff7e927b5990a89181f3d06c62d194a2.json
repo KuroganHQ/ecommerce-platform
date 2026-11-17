@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT left($1, length($1) - length(domain) - 1) AS \"label!\"\n           FROM platform.account_domains WHERE $1 LIKE '%.' || domain",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "label!",
+        "type_info": "Text",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "a7aa64c57da37ee88c6f4bca3c9067edff7e927b5990a89181f3d06c62d194a2"
+}

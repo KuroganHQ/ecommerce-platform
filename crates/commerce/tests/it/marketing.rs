@@ -26,6 +26,7 @@ fn urls() -> PublicUrls {
     PublicUrls {
         scheme: "http".into(),
         port: None,
+        ..PublicUrls::default()
     }
 }
 

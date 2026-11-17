@@ -35,6 +35,7 @@ impl Role {
 /// shadow them.
 const RESERVED_SLUGS: &[&str] = &[
     "admin", "api", "auth", "mail", "s3", "checkout", "www", "edge", "internal", "static",
+    "accounts",
 ];
 
 pub fn validate_slug(slug: &str) -> Result<(), Error> {
@@ -45,11 +46,12 @@ pub fn validate_slug(slug: &str) -> Result<(), Error> {
             .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || *c == b'-')
         && !slug.starts_with('-')
         && !slug.ends_with('-')
-        && !slug.starts_with("preview-");
+        && !slug.starts_with("preview-")
+        && !slug.contains("--");
     if !ok {
         return Err(invalid(
             "invalid_slug",
-            "slug must be 1-63 lowercase letters, digits or inner hyphens",
+            "slug must be 1-63 lowercase letters, digits or single inner hyphens",
         ));
     }
     if RESERVED_SLUGS.contains(&slug) {
@@ -331,10 +333,68 @@ pub async fn verify_domain(db: &PgPool, host: &str, txt_records: &[String]) -> R
     Ok(true)
 }
 
+/// Inserts the platform's account domain (A1) if missing. Its trigger refuses a domain that
+/// covers a shop hostname.
+pub async fn ensure_account_domain(db: &PgPool, domain: &str) -> Result<(), Error> {
+    let domain = normalize_host(domain)?;
+    sqlx::query!(
+        "INSERT INTO platform.account_domains (domain) VALUES ($1) ON CONFLICT (domain) DO NOTHING",
+        domain
+    )
+    .execute(db)
+    .await
+    .map_err(|e| {
+        if e.as_database_error().and_then(|d| d.constraint()) == Some("account_domain") {
+            invalid(
+                "account_domain_covers_shop",
+                "the account domain covers a shop hostname",
+            )
+        } else {
+            e.into()
+        }
+    })?;
+    Ok(())
+}
+
+/// The account origin's label of a market: `<slug>` for the default market,
+/// `<market code>--<slug>` otherwise (A1). Not length-checked; see [`account_label`].
+pub fn account_host_label(slug: &str, market_code: &str, is_default: bool) -> String {
+    if is_default {
+        slug.to_owned()
+    } else {
+        format!("{market_code}--{slug}")
+    }
+}
+
+/// [`account_host_label`], refused when it does not fit a DNS label.
+pub fn account_label(slug: &str, market_code: &str, is_default: bool) -> Result<String, Error> {
+    let label = account_host_label(slug, market_code, is_default);
+    if label.len() > 63 {
+        return Err(invalid(
+            "account_label_too_long",
+            "market code and tenant slug together exceed 61 characters",
+        ));
+    }
+    Ok(label)
+}
+
+/// Which origin a resolved host is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum HostKind {
+    Shop,
+    /// `<label>.<account domain>`: customer accounts only (A1).
+    Account,
+}
+
 /// What the edge needs to serve a hostname (spec §5.1, `GET /internal/v1/resolve`).
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct Resolved {
     pub hostname: String,
+    pub kind: HostKind,
+    /// The market's shop host: `hostname` itself for a shop, the market's primary domain for
+    /// an account origin.
+    pub shop_hostname: String,
     pub tenant_id: Uuid,
     pub tenant_slug: String,
     pub market_id: Uuid,
@@ -393,11 +453,65 @@ pub struct CheckoutOriginPolicy {
     pub checkout_origin: String,
 }
 
-/// Resolves a verified domain of an active tenant; `None` for anything else.
+/// Resolves a verified domain of an active tenant, or an account origin of one of its
+/// markets; `None` for anything else.
 pub async fn resolve_host(db: &PgPool, host: &str) -> Result<Option<Resolved>, Error> {
     let Ok(host) = normalize_host(host) else {
         return Ok(None);
     };
+    let label = sqlx::query_scalar!(
+        r#"SELECT left($1, length($1) - length(domain) - 1) AS "label!"
+           FROM platform.account_domains WHERE $1 LIKE '%.' || domain"#,
+        host
+    )
+    .fetch_optional(db)
+    .await?;
+    let Some(label) = label else {
+        return resolve_shop(db, host).await;
+    };
+    let Some(shop_host) = account_shop_host(db, &label).await? else {
+        return Ok(None);
+    };
+    Ok(resolve_shop(db, shop_host).await?.map(|r| Resolved {
+        hostname: host,
+        kind: HostKind::Account,
+        ..r
+    }))
+}
+
+async fn account_shop_host(db: &PgPool, label: &str) -> Result<Option<String>, Error> {
+    if label.contains('.') {
+        return Ok(None);
+    }
+    let (code, slug) = match label.rsplit_once("--") {
+        Some((code, slug)) => (Some(code), slug),
+        None => (None, label),
+    };
+    let Some(tenant_id) =
+        sqlx::query_scalar!("SELECT id FROM platform.tenants WHERE slug = $1", slug)
+            .fetch_optional(db)
+            .await?
+    else {
+        return Ok(None);
+    };
+    let mut tx = tenant_tx(db, tenant_id).await?;
+    let host = sqlx::query_scalar!(
+        "SELECT (SELECT d.hostname FROM platform.domains d
+                 WHERE d.market_id = m.id AND d.verified_at IS NOT NULL
+                 ORDER BY d.is_primary DESC, d.hostname LIMIT 1)
+         FROM markets m
+         WHERE CASE WHEN $1::text IS NULL THEN m.is_default
+                    ELSE m.code = $1 AND NOT m.is_default END",
+        code
+    )
+    .fetch_optional(&mut *tx)
+    .await?
+    .flatten();
+    tx.commit().await?;
+    Ok(host)
+}
+
+async fn resolve_shop(db: &PgPool, host: String) -> Result<Option<Resolved>, Error> {
     let Some(d) = sqlx::query!(
         r#"SELECT d.tenant_id, d.market_id, t.slug, s.token AS "token?"
          FROM platform.domains d JOIN platform.tenants t ON t.id = d.tenant_id
@@ -448,7 +562,9 @@ pub async fn resolve_host(db: &PgPool, host: &str) -> Result<Option<Resolved>, E
     let experiment = crate::experiments::running(&mut tx).await?;
     tx.commit().await?;
     Ok(Some(Resolved {
+        shop_hostname: host.clone(),
         hostname: host,
+        kind: HostKind::Shop,
         tenant_id: d.tenant_id,
         tenant_slug: d.slug,
         market_id: d.market_id,
@@ -604,6 +720,8 @@ mod tests {
             "preview-x",
             "api",
             "auth",
+            "accounts",
+            "de--mo",
         ] {
             assert!(validate_slug(bad).is_err(), "{bad}");
         }

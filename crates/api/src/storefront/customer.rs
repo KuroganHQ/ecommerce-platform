@@ -14,6 +14,7 @@ use axum::extract::rejection::PathRejection;
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
+use commerce::consent::{self, ConsentChoice, ConsentState};
 use commerce::customers::{
     self, Address, AddressInput, CustomerView, MagicLinkRequest, MagicLinkToken, PasswordChange,
     PasswordLogin, PasswordOutcome, SignedIn,
@@ -53,6 +54,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
         .routes(routes!(update_address, delete_address))
         .routes(routes!(my_orders))
         .routes(routes!(my_order))
+        .routes(routes!(get_account_consent, post_account_consent))
 }
 
 pub(crate) fn header_str<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
@@ -299,6 +301,59 @@ async fn set_password(
             code: "invalid_current_password",
         }),
     }
+}
+
+/// The signed-in customer's email preferences (account origin, A1, A20).
+#[utoipa::path(
+    get,
+    path = "/storefront/v1/customer/consent",
+    tag = "storefront",
+    params(StorefrontHeaders, SessionHeader),
+    responses(
+        (status = 200, body = ConsentState),
+        (status = 401, body = platform::Problem, content_type = "application/problem+json"),
+    )
+)]
+async fn get_account_consent(
+    shopper: Shopper,
+    State(s): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Response, Error> {
+    let state = as_customer(&s, &shopper, &headers, async |tx, c| {
+        consent::account_state(tx, c).await
+    })
+    .await?;
+    Ok(no_store(Json(state).into_response()))
+}
+
+/// Saves `email_marketing` and `review_invites` for the signed-in customer (source `account`;
+/// a body `source` is ignored). Any other purpose is refused.
+#[utoipa::path(
+    post,
+    path = "/storefront/v1/customer/consent",
+    tag = "storefront",
+    params(StorefrontHeaders, SessionHeader),
+    request_body = ConsentChoice,
+    responses(
+        (status = 200, body = ConsentState),
+        (status = 401, body = platform::Problem, content_type = "application/problem+json"),
+        (status = 422, body = platform::Problem, content_type = "application/problem+json"),
+    )
+)]
+async fn post_account_consent(
+    shopper: Shopper,
+    State(s): State<AppState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<Response, Error> {
+    let choice: ConsentChoice = parse_json(&body)?;
+    let state = as_customer(&s, &shopper, &headers, async |tx, c| {
+        let ip = ip_hash(tx, &headers).await?;
+        consent::record_account(tx, c, &choice, ip.as_deref()).await?;
+        consent::account_state(tx, c).await
+    })
+    .await?;
+    Ok(no_store(Json(state).into_response()))
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]

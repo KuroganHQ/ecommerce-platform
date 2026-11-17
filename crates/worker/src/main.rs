@@ -77,6 +77,9 @@ async fn main() -> anyhow::Result<()> {
     let urls = commerce::storefront::PublicUrls {
         scheme: sf.scheme,
         port: sf.port,
+        account_domain: sf
+            .account_domain
+            .ok_or(platform::config::ConfigError::Missing("ACCOUNT_DOMAIN"))?,
     };
     // Ad-platform forwarding: fixed vendor hosts through the SSRF-safe client (A21); in dev,
     // AD_PLATFORMS_BASE_URL points them at the mocks.

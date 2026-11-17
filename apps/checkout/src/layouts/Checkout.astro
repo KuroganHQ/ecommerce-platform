@@ -10,6 +10,7 @@ interface Props {
   /** Localized "My account" (from the shop's messages). */
   accountLabel?: string;
   withdrawalLabel?: string;
+  withdrawUrl?: string;
   /** The two-column checkout needs more room than the account pages. */
   wide?: boolean;
   pageToken?: string;
@@ -22,6 +23,7 @@ const {
   lang = "cs",
   accountLabel = "Můj účet",
   withdrawalLabel = "Odstoupení od smlouvy",
+  withdrawUrl = "/withdraw",
   wide = false,
   pageToken,
   platformLinks = true,
@@ -61,7 +63,7 @@ const fresh =
     {
       platformLinks && (
         <footer class:list={["mx-auto px-4 py-6 text-sm text-muted-foreground", width]}>
-          <a href="/withdraw" class="underline">{withdrawalLabel}</a>
+          <a href={withdrawUrl} class="underline">{withdrawalLabel}</a>
         </footer>
       )
     }

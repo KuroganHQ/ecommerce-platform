@@ -27,7 +27,13 @@ const m = shop?.messages ?? {};
       m={messages(m, "consent.", "account.error", "account.too_many")}
       purposes={state?.purposes ?? {}}
       textVersion={shop?.consent.text_version ?? "1"}
-      signedIn={me !== null}
+      shown={[
+        "analytics",
+        "ads",
+        "personalization",
+        ...(me ? (["email_marketing", "review_invites"] as const) : []),
+      ]}
+      endpoint="/_p/consent"
     />
   </div>
 </Checkout>
