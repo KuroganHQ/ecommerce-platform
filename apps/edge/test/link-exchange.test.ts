@@ -237,7 +237,7 @@ describe("every C5 parameter is stripped before a platform page renders", () => 
       expect(res.status).toBe(303);
       expect(res.headers.get("location")).toBe(
         doubledLink
-          ? `${page === "/review" ? "/review" : "/withdraw/declaration"}?link=invalid`
+          ? `${page}?link=invalid`
           : `${page}?error=stale_page${stripeReturn ? "&returned=1" : ""}`,
       );
       expect(res.headers.get("cache-control")).toBe("no-store");

@@ -192,7 +192,7 @@ describe("emailed withdrawal and review links exchange to grants on clean URLs (
   );
 
   test.each([
-    ["/withdraw?t=", "/withdraw/declaration?link=invalid", WITHDRAWAL_LINK, "t"],
+    ["/withdraw?t=", "/withdraw?link=invalid", WITHDRAWAL_LINK, "t"],
     ["/review?token=", "/review?link=invalid", REVIEW_LINK, "token"],
   ])("%s fails closed to %s and keeps the cookie", async (prefix, failed, good, name) => {
     const cases = [

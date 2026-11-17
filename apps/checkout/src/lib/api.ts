@@ -62,6 +62,8 @@ export function checkoutApi(request: Request) {
       /^[0-9a-f]{64}$/.test(token)
         ? get<WithdrawalForm>(`/withdrawals/${token}`)
         : Promise.resolve(null),
+    withdrawalByGrant: () => get<WithdrawalForm>("/link-grants/withdrawal"),
+    reviewByGrant: () => get<ReviewInvitation>("/link-grants/review"),
     myWithdrawalForm: (id: string) =>
       /^[0-9a-f-]{36}$/.test(id)
         ? get<WithdrawalForm>(`/customer/orders/${id}/withdrawal`)

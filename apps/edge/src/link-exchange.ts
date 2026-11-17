@@ -21,10 +21,10 @@ const ORDER_PAGE = /^\/o\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-
 export const WITHDRAWAL_PAGE = "/withdraw/declaration";
 export const REVIEW_PAGE = "/review";
 
-const ACTION_LINKS = new Map([
-  ["/withdraw", { parameter: "t", kind: "withdrawal", page: WITHDRAWAL_PAGE }],
-  ["/review", { parameter: "token", kind: "review", page: REVIEW_PAGE }],
-] as const);
+const ACTION_LINKS = new Map<string, { parameter: string; kind: "withdrawal" | "review" }>([
+  ["/withdraw", { parameter: "t", kind: "withdrawal" }],
+  ["/review", { parameter: "token", kind: "review" }],
+]);
 const LINK_TOKEN = /^[0-9a-f]{64}$/;
 
 export type Link = { kind: "order" | "withdrawal" | "review"; token: string };
@@ -73,7 +73,7 @@ export function linkIngress(url: URL): LinkIngress | null {
 export const failedLink = (kind: Link["kind"]) =>
   kind === "order"
     ? REOPEN_LINK_PATH
-    : `${kind === "review" ? REVIEW_PAGE : WITHDRAWAL_PAGE}?link=invalid`;
+    : `${kind === "review" ? REVIEW_PAGE : "/withdraw"}?link=invalid`;
 
 export function cleanUrl(resource: unknown): string | null {
   const r = resource as { kind?: unknown; id?: unknown } | null | undefined;

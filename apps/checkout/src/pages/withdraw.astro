@@ -4,10 +4,12 @@ import WithdrawalHistory from "../components/WithdrawalHistory.astro";
 import WithdrawalForm from "../islands/WithdrawalForm";
 import WithdrawalRequest from "../islands/WithdrawalRequest";
 import Checkout from "../layouts/Checkout.astro";
-import { checkoutApi, messages, shopUrl } from "../lib/api";
+import { checkoutApi, grantPageToken, messages, shopUrl } from "../lib/api";
 
 const api = checkoutApi(Astro.request);
 const token = Astro.url.searchParams.get("t");
+const pageToken = grantPageToken(Astro.request);
+const invalidLink = token !== null || Astro.url.searchParams.get("link") === "invalid";
 const [shop, form] = await Promise.all([
   api.shop(),
   token !== null ? api.withdrawalForm(token) : null,
@@ -22,7 +24,7 @@ if (token !== null && !form) Astro.response.status = 404;
 const legalPages = shop?.legal_pages ?? [];
 ---
 
-<Checkout title={t(m, "withdraw.title")} shopName={shop?.name ?? ""} shopUrl={shopUrl(Astro.url)} lang={locale} accountLabel={t(m, "account.nav")} withdrawalLabel={t(m, "withdraw.title")}>
+<Checkout title={t(m, "withdraw.title")} shopName={shop?.name ?? ""} shopUrl={shopUrl(Astro.url)} lang={locale} accountLabel={t(m, "account.nav")} withdrawalLabel={t(m, "withdraw.title")} pageToken={pageToken} platformLinks={!pageToken}>
   <div class="grid gap-5">
     <h1 class="font-display text-2xl font-bold">{t(m, "withdraw.title")}</h1>
     <p class="text-sm text-muted-foreground">{t(m, "withdraw.rights")}</p>
@@ -33,7 +35,7 @@ const legalPages = shop?.legal_pages ?? [];
       <WithdrawalForm client:load form={form} target={{ mode: "token", id: token }} m={messages(m, "withdraw.")} locale={locale} />
       <WithdrawalHistory receipts={form.withdrawals} m={m} locale={locale} />
     </> : <>
-      {token !== null && <p role="alert">{t(m, "withdraw.link_invalid")}</p>}
+      {invalidLink && <p role="alert">{t(m, "withdraw.link_invalid")}</p>}
       <WithdrawalRequest client:load m={messages(m, "withdraw.")} />
     </>}
   </div>

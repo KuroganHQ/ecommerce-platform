@@ -97,3 +97,21 @@ test.each([403, 404])(
     expect(r).toEqual({ ok: false, status, data: null, code: `code_${status}` });
   },
 );
+
+test.each([
+  [403, "/_p/withdraw"],
+  [404, "/_p/withdraw"],
+  [403, "/_p/withdraw/declaration"],
+  [404, "/_p/withdraw/declaration"],
+])(
+  "a withdrawal call refused with %i at %s reloads its own page, never the checkout",
+  async (status, path) => {
+    const assign = page("page-token");
+    const fetch = answer(status);
+    const r = await call("POST", path, { confirm: true });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(assign).not.toHaveBeenCalled();
+    expect(assign.reload).toHaveBeenCalledTimes(1);
+    expect(r).toEqual({ ok: false, status, data: null, code: "stale_page" });
+  },
+);
