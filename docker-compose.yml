@@ -346,6 +346,7 @@ services:
       # the SSRF-safe client's dev allowlist. Both are ignored unless APP_ENV=dev.
       AD_PLATFORMS_BASE_URL: http://mocks:4010/ads
       SAFE_FETCH_ALLOW_HOSTS: mocks
+      SAME_ORIGIN_CHECKOUT_READY: ${SAME_ORIGIN_CHECKOUT_READY:-0}
     depends_on:
       migrate: { condition: service_completed_successfully }
       minio-init: { condition: service_completed_successfully }

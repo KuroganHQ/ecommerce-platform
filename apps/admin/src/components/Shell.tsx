@@ -126,6 +126,11 @@ const groups: { icon: IconName; label: () => string; items: NavItem[] }[] = [
       { href: "/audit-log", label: () => t("nav.auditLog"), min: "admin" },
       { href: "/settings/webhooks", label: () => t("nav.webhooks"), min: "admin" },
       { href: "/settings/ad-tracking", label: () => t("nav.adTracking"), min: "admin" },
+      {
+        href: "/settings/checkout-origins",
+        label: () => t("nav.checkoutOrigins"),
+        min: "admin",
+      },
     ],
   },
   {

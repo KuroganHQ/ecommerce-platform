@@ -930,6 +930,7 @@ export const en = {
     security: "Security",
     webhooks: "Webhooks",
     adTracking: "Ad tracking",
+    checkoutOrigins: "Checkout domains",
     platform: "Platform",
     jobs: "Background jobs",
     marketing: "Marketing",
@@ -1196,6 +1197,13 @@ export const en = {
     generic: "The request failed ({{code}}).",
     network: "The server could not be reached. Check your connection and try again.",
     reauth_required: "The action was cancelled: it needs a recent sign-in.",
+    checkout_not_ready: "The platform is not ready for same-origin checkout.",
+    origin_history_unknown: "The platform claim of this hostname is incomplete.",
+    platform_hostname:
+      "A platform hostname's history is the platform's own; it takes no attestation.",
+    attestation_required: "A custom domain needs the merchant's full-history attestation.",
+    unsupported_attestation_version: "The current attestation is version 1.",
+    invalid_origin: "Origin must be an exact browser origin such as https://shop.example.",
     insufficient_role: "Your role does not allow this action.",
     not_a_member: "You are not a member of this shop.",
     not_found: "It no longer exists.",
@@ -1863,6 +1871,50 @@ export const en = {
     noDeliveries: "No deliveries yet",
     noDeliveriesDesc: "Deliveries appear here once a subscribed event happens.",
     showDeliveries: "Deliveries",
+  },
+  checkoutOrigins: {
+    title: "Checkout domains",
+    lead: "Each web address of the shop has a checkout mode: isolated (checkout on checkout.<shop>) or same-origin (checkout on the address itself). The server decides whether a switch is allowed.",
+    empty: "No web addresses yet",
+    emptyDesc: "Addresses appear here once the shop has a verified domain.",
+    origin: "Web address",
+    mode: "Checkout mode",
+    generation: "Generation",
+    history: "History",
+    attestation: "Attestation",
+    isolated: "Isolated",
+    same_origin: "Same-origin",
+    histories: {
+      unknown_or_used: "Unknown",
+      platform_never_reassigned: "Platform address",
+      merchant_attested_never_served: "Attested",
+    },
+    attestedAt: "Version {{version}}, {{at}}",
+    recordHistory: "Record history",
+    switchTo: {
+      isolated: "Switch to isolated",
+      same_origin: "Switch to same-origin",
+    },
+    ownerOnly: "Only the shop owner can record history or switch the checkout mode.",
+    historyTitle: "Record the history of {{origin}}",
+    historyLead:
+      "A platform address needs no attestation. For your own domain, confirm its full history:",
+    attestationText:
+      "I know the full history of this exact web address. It never served a website outside this platform, under me or an earlier owner.",
+    attestationHint: "Required for a custom domain. Leave it unchecked for a platform address.",
+    switchTitle: {
+      isolated: "Switch {{origin}} to isolated checkout?",
+      same_origin: "Switch {{origin}} to same-origin checkout?",
+    },
+    restartImpact:
+      "It ends every checkout in progress on the shop, on all its domains: open checkouts, link grants, identify and placement states stop working in the switch's transaction, and customers start checkout again. Emailed order links keep working.",
+    rollbackDns:
+      "Provision and verify DNS and TLS for {{host}} first, or isolated checkout has no host.",
+    historyRecorded: "History of {{origin}} recorded.",
+    switched: {
+      isolated: "{{origin}} now uses isolated checkout.",
+      same_origin: "{{origin}} now uses same-origin checkout.",
+    },
   },
   adTracking: {
     title: "Ad tracking",
