@@ -750,6 +750,44 @@ fn conflict(code: &'static str, detail: &str) -> Error {
     }
 }
 
+/// The review step still holds for the cart at `version`: the same cart, both legal consents
+/// and a note within bounds. Returns the trimmed note.
+fn reviewed(version: i32, input: &PlaceOrderInput) -> Result<Option<String>, Error> {
+    if version != input.version {
+        return Err(conflict(
+            "cart_changed",
+            "the cart changed; review the order again",
+        ));
+    }
+    if !input.accept_terms || !input.accept_withdrawal {
+        return Err(invalid(
+            "legal_consent_required",
+            "accept the terms and the withdrawal information",
+        ));
+    }
+    let notes = input
+        .notes
+        .as_deref()
+        .map(str::trim)
+        .filter(|n| !n.is_empty())
+        .map(str::to_owned);
+    if notes.as_ref().is_some_and(|n| n.chars().count() > MAX_NOTE) {
+        return Err(invalid(
+            "invalid_notes",
+            "notes are at most 1000 characters",
+        ));
+    }
+    Ok(notes)
+}
+
+pub(crate) async fn check_review(
+    tx: &mut TenantTx,
+    cart_id: Uuid,
+    input: &PlaceOrderInput,
+) -> Result<(), Error> {
+    reviewed(state(tx, cart_id).await?.version, input).map(drop)
+}
+
 /// Places the order for the cart behind the checkout capability `token` (A12). `key` is the
 /// client's `Idempotency-Key`, `request_hash` the hash of the request body.
 #[allow(clippy::too_many_arguments)]
@@ -785,30 +823,7 @@ pub async fn place_order(
         ));
     }
     let st = state(tx, cart_ref.id).await?;
-    if st.version != input.version {
-        return Err(conflict(
-            "cart_changed",
-            "the cart changed; review the order again",
-        ));
-    }
-    if !input.accept_terms || !input.accept_withdrawal {
-        return Err(invalid(
-            "legal_consent_required",
-            "accept the terms and the withdrawal information",
-        ));
-    }
-    let notes = input
-        .notes
-        .as_deref()
-        .map(str::trim)
-        .filter(|n| !n.is_empty())
-        .map(str::to_owned);
-    if notes.as_ref().is_some_and(|n| n.chars().count() > MAX_NOTE) {
-        return Err(invalid(
-            "invalid_notes",
-            "notes are at most 1000 characters",
-        ));
-    }
+    let notes = reviewed(st.version, input)?;
     let note_written = notes.is_some();
 
     // Validation (A3, §10.3 step 1).
@@ -1337,11 +1352,16 @@ pub async fn send_payment_reminders(
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct CheckoutReceipt {
+    /// Selects the clean order page `/o/<order id>`; not a credential.
+    pub order_id: Uuid,
     pub number: String,
     /// The checkout's own confirmation email, frozen at placement.
     pub email: String,
     /// An online payment (Stripe, the fake gateway) is not completed yet.
     pub payment_due: bool,
+    /// The checkout was linked to an account, but the account origin vouched for no account or
+    /// another one, so the order belongs to no account (A2.4).
+    pub placed_as_guest: bool,
 }
 
 pub async fn receipt(
@@ -1352,9 +1372,11 @@ pub async fn receipt(
     let c = checkout_access::converted(tx, ctx, token).await?;
     sqlx::query_as!(
         CheckoutReceipt,
-        r#"SELECT o.number::text AS "number!", c.email AS "email!",
+        r#"SELECT o.id AS order_id, o.number::text AS "number!", c.email AS "email!",
                   (o.payment_method IN ('stripe', 'fake')
-                   AND o.payment_status IN ('unpaid', 'failed', 'expired')) AS "payment_due!"
+                   AND o.payment_status IN ('unpaid', 'failed', 'expired')) AS "payment_due!",
+                  EXISTS (SELECT 1 FROM checkout_placements p
+                          WHERE p.cart_id = c.id AND p.as_guest) AS "placed_as_guest!"
            FROM orders o JOIN carts c ON c.id = o.cart_id
            WHERE o.cart_id = $1 AND c.email IS NOT NULL"#,
         c.id

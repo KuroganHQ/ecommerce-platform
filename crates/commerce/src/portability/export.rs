@@ -38,6 +38,7 @@ pub const SKIPPED_TABLES: &[&str] = &[
     "account_codes",
     "checkout_handoffs",
     "checkout_identities",
+    "checkout_placements",
     "customer_auth_attempts",
     "customer_magic_links",
     "customer_sessions",
