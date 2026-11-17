@@ -3,7 +3,6 @@ import { expect, test } from "@playwright/test";
 import { run, sql } from "../admin/support";
 import {
   checkoutOf,
-  FRESH,
   FRESH_HTTPS,
   historyTraces,
   mail,
@@ -11,7 +10,7 @@ import {
   securityContext,
 } from "./support";
 
-const OLD = checkoutOf(FRESH);
+const OLD = checkoutOf(FRESH_HTTPS);
 
 test("old checkout-host order, review and newsletter links reach clean shop URLs", async ({
   browser,
@@ -34,8 +33,8 @@ test("old checkout-host order, review and newsletter links reach clean shop URLs
     if (r.status() === 308) hops.push(`${r.url()} -> ${r.headers().location}`);
   });
   await reader.goto(`${OLD}/o/${token}`);
-  await reader.waitForURL(`${FRESH}/o/${id}`);
-  expect(hops).toEqual([`${OLD}/o/${token} -> ${FRESH}/o/${token}`]);
+  await reader.waitForURL(`${FRESH_HTTPS}/o/${id}`);
+  expect(hops).toEqual([`${OLD}/o/${token} -> ${FRESH_HTTPS}/o/${token}`]);
   await expect(reader.getByText(email).first()).toBeVisible();
   const traces = await historyTraces(reader);
   for (const seen of [...traces.entries, traces.referrer, traces.html])
@@ -48,7 +47,7 @@ test("old checkout-host order, review and newsletter links reach clean shop URLs
     SELECT tenant_id, id, order_id, product_id, '\\x${hash}'::bytea, now() + interval '90 days'
     FROM order_lines WHERE order_id = '${id}' ORDER BY position LIMIT 1`);
   await reader.goto(`${OLD}/review?token=${review}`);
-  await reader.waitForURL(`${FRESH}/review`);
+  await reader.waitForURL(`${FRESH_HTTPS}/review`);
   await expect(reader.getByRole("heading", { name: "Napsat recenzi" })).toBeVisible();
   await expect(reader.locator('input[name="_pt"]')).toHaveCount(1);
 
@@ -64,7 +63,7 @@ test("old checkout-host order, review and newsletter links reach clean shop URLs
     `${FRESH_HTTPS}/newsletter/confirm?token=${nl}`,
   );
   await reader.goto(`${OLD}/newsletter/confirm?token=${nl}`);
-  await reader.waitForURL(`${FRESH}/newsletter/confirm`);
+  await reader.waitForURL(`${FRESH_HTTPS}/newsletter/confirm`);
   await expect(reader.getByRole("button", { name: "Potvrdit odběr" })).toBeVisible();
 
   for (const path of ["//attacker.example/o", `/start?h=${"0".repeat(64)}`, "/nonsense"]) {
