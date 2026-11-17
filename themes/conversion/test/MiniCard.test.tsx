@@ -23,18 +23,20 @@ const product = {
 
 const colors = { "product.colors": "Barvy: {names}" };
 const text = (html: string) => html.replace(/<!--.*?-->|<[^>]+>/g, "");
-const render = (p: object, labels: Record<string, string>) =>
-  renderToString(() => <MiniCard product={p as ProductCard} base="" labels={labels} />);
+const render = (p: object, swatches = true) =>
+  renderToString(() => (
+    <MiniCard product={p as ProductCard} base="" labels={colors} swatches={swatches} />
+  ));
 
 test("names every colour for screen readers and shows four dots plus the rest as a count", () => {
-  const html = render(product, colors);
+  const html = render(product);
   expect(text(html)).toContain("Barvy: Námořnická, Lahvová, Písková, Přírodní, Růžová");
   expect(html.match(/<circle\b[^>]*fill="#[0-9a-f]{6}"/g)).toHaveLength(4);
   expect(text(html)).toContain("+1");
 });
 
-test("shows no colour row for a product without swatches or a caller without the label", () => {
-  expect(text(render({ ...product, swatches: [] }, colors))).not.toContain("Barvy");
-  expect(render({ ...product, swatches: undefined }, colors)).not.toContain("<circle");
-  expect(render(product, {})).not.toContain("<circle");
+test("shows no colour row for a product without swatches or a caller that does not ask for them", () => {
+  expect(text(render({ ...product, swatches: [] }))).not.toContain("Barvy");
+  expect(render({ ...product, swatches: undefined })).not.toContain("<circle");
+  expect(render(product, false)).not.toContain("<circle");
 });

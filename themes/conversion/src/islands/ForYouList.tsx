@@ -44,7 +44,13 @@ export default function ForYouList(props: Props) {
           <For each={items()}>
             {(p) => (
               <li>
-                <MiniCard product={p} base={props.base} labels={props.labels} sizes={props.sizes} />
+                <MiniCard
+                  product={p}
+                  base={props.base}
+                  labels={props.labels}
+                  sizes={props.sizes}
+                  swatches
+                />
               </li>
             )}
           </For>
