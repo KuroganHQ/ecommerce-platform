@@ -222,6 +222,7 @@ pub async fn confirm_placement(
     if !capability::well_formed(state) {
         return Err(Error::NotFound);
     }
+    checkout_access::open_for_order(tx, ctx, token).await?;
     let (c, p) = open_same_origin(tx, ctx, token).await?;
     let origin = ctx.origin.as_ref().ok_or(Error::NotFound)?;
     let evidence = account_codes::consume(tx, Purpose::Placement, state, origin, code)

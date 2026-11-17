@@ -603,3 +603,84 @@ async fn changed_version_aborts(db: PgPool) {
     assert_eq!(c.orders().await, 0);
     assert_eq!(c.unconsumed_placement().await, (1, 1));
 }
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_confirmation_overlapping_another_place_post_never_deadlocks(db: PgPool) {
+    let c = setup(db, CheckoutMode::SameOrigin).await;
+    let method = c.placeable().await;
+    let (ana, _) = c.signed_in("ana@example.cz").await;
+    let (cart, view) = c.linked(method, &ana).await;
+    let state = c.placement_state(&cart, "first", &view, "").await;
+    let code = c.placement_code(Some(&ana), &state).await;
+
+    let mut other_tab = platform::db::tenant_tx(&c.runtime, c.shop.tenant)
+        .await
+        .unwrap();
+    let ctx = c.context(&mut other_tab).await;
+    let pid: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
+        .fetch_one(&mut *other_tab)
+        .await
+        .unwrap();
+    sqlx::query(
+        "SELECT 1 FROM carts WHERE id = (SELECT source_cart_id FROM carts
+                                         WHERE checkout_token_hash = $1) FOR UPDATE",
+    )
+    .bind(commerce::capability::hash(&cart))
+    .fetch_one(&mut *other_tab)
+    .await
+    .unwrap();
+
+    let callback = tokio::spawn({
+        let (runtime, tenant, cz, origin, settings) = (
+            c.runtime.clone(),
+            c.shop.tenant,
+            c.shop.cz,
+            c.shop.origin.clone(),
+            c.s.checkout.clone(),
+        );
+        let (cart, state, code) = (cart.clone(), state.clone(), code.clone());
+        async move {
+            let mut tx = platform::db::tenant_tx(&runtime, tenant).await.unwrap();
+            let mut ctx =
+                storefront::context(&mut tx, &PublicUrls::default(), cz, None, Utc::now())
+                    .await
+                    .unwrap();
+            ctx.origin = Some(origin);
+            let result = checkout_identity::confirm_placement(
+                &mut tx, &ctx, &settings, &cart, &state, &code, None,
+            )
+            .await
+            .map(|_| ());
+            if result.is_ok() {
+                tx.commit().await.unwrap();
+            }
+            result
+        }
+    });
+    waiting_on(&c.db, pid).await;
+    let input = serde_json::from_value(place_body(&view, "")).unwrap();
+    let placed = checkout_identity::place(
+        &mut other_tab,
+        &ctx,
+        &c.s.checkout,
+        &cart,
+        "other-tab",
+        "other-tab",
+        &input,
+        &commerce::checkout::Placer::default(),
+    )
+    .await;
+    let other = format!("{placed:?}");
+    assert!(
+        matches!(placed, Ok(checkout_identity::Placing::Confirm(_))),
+        "the other tab's place-order starts a fresh confirmation: {other}"
+    );
+    other_tab.commit().await.unwrap();
+    let confirmed = callback.await.unwrap();
+    assert!(
+        matches!(confirmed, Err(platform::Error::NotFound)),
+        "the confirmation queued behind it finds its state revoked, no deadlock: {confirmed:?}"
+    );
+    assert_eq!(c.orders().await, 0);
+    assert_eq!(c.unconsumed_placement().await, (1, 1));
+}
