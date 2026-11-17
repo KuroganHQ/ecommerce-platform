@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM link_grants WHERE token_hash = $1 AND origin = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Bytea",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a708a211452337a8e73ce8831f33403b3f5ed5aa54a5ea92a91ee74a32728884"
+}

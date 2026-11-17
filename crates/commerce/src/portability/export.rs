@@ -45,6 +45,7 @@ pub const SKIPPED_TABLES: &[&str] = &[
     "flow_unsubscribe_tokens",
     "flow_watch_mail_quotas",
     "idempotency_keys",
+    "link_grants",
     "order_tokens",
     "review_tokens",
     "withdrawal_tokens",

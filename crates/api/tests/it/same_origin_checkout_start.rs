@@ -12,6 +12,7 @@ use uuid::Uuid;
 
 use crate::common::*;
 
+mod link_grants;
 mod pii_rotation;
 mod placement_recovery;
 

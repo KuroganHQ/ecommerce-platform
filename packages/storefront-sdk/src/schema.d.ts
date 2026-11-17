@@ -686,6 +686,63 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/storefront/v1/link-grants": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Exchanges a link for a grant scoped to its resource and action, this origin and its
+         *     checkout mode, and revokes `previous`. The grant is in the `X-Link-Grant` response header.
+         */
+        post: operations["exchange"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/storefront/v1/link-grants/orders/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The order a grant may read. Paying stays with the checkout capability or the customer. */
+        get: operations["order"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/storefront/v1/link-grants/withdrawal-request": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * The public withdrawal form's request (as `POST /withdrawals`, always `202`). It completes
+         *     the anonymous grant in the same transaction, so a refused request keeps it.
+         */
+        post: operations["request_withdrawal"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/storefront/v1/newsletter/click": {
         parameters: {
             query?: never;
@@ -1663,6 +1720,14 @@ export interface components {
         DocumentLinks: {
             items: components["schemas"]["DocumentLink"][];
         };
+        ExchangeInput: {
+            link: components["schemas"]["LinkInput"];
+            /** @description The grant the browser held before; it is revoked. */
+            previous?: string | null;
+        };
+        Exchanged: {
+            resource: components["schemas"]["GrantedResource"];
+        };
         Facet: {
             /** @description `opt.<code>`, `param.<key>` or `brand`; the filter key to send back. */
             key: string;
@@ -1728,6 +1793,15 @@ export interface components {
             safety_info?: string | null;
             warnings?: string | null;
         };
+        GrantedResource: {
+            /** Format: uuid */
+            id: string;
+            /** @enum {string} */
+            kind: "order";
+        } | {
+            /** @enum {string} */
+            kind: "withdrawal_request";
+        };
         HandoffToken: {
             /** @description Single use, valid for 60 seconds, for `checkout.<shop>/start?h=`. */
             token: string;
@@ -1791,6 +1865,14 @@ export interface components {
         Link: {
             href: string;
             label: string;
+        };
+        LinkInput: {
+            /** @enum {string} */
+            kind: "order";
+            token: string;
+        } | {
+            /** @enum {string} */
+            kind: "withdrawal_request";
         };
         LinkRequest: {
             email: string;
@@ -4587,6 +4669,143 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["WatchStatus"];
+                };
+            };
+        };
+    };
+    exchange: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description The tenant's public storefront token. */
+                "X-Storefront-Token": string;
+                /** @description Market id resolved from the shop host by the edge. */
+                "X-Market": string;
+                /** @description Locale hint (one of the market's locales). */
+                "X-Locale"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExchangeInput"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    /** @description The new grant */
+                    "X-Link-Grant"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Exchanged"];
+                };
+            };
+            /** @description unknown or expired link */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description checkout_mode_changed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    order: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description The tenant's public storefront token. */
+                "X-Storefront-Token": string;
+                /** @description Market id resolved from the shop host by the edge. */
+                "X-Market": string;
+                /** @description Locale hint (one of the market's locales). */
+                "X-Locale"?: string | null;
+                /** @description The link grant from the `__Host-Http-cap` cookie. */
+                "X-Link-Grant": string;
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrderView"];
+                };
+            };
+            /** @description no grant for this order */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    request_withdrawal: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description The tenant's public storefront token. */
+                "X-Storefront-Token": string;
+                /** @description Market id resolved from the shop host by the edge. */
+                "X-Market": string;
+                /** @description Locale hint (one of the market's locales). */
+                "X-Locale"?: string | null;
+                /** @description The link grant from the `__Host-Http-cap` cookie. */
+                "X-Link-Grant": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LinkRequest"];
+            };
+        };
+        responses: {
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description no withdrawal-request grant */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description invalid_email */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
                 };
             };
         };
