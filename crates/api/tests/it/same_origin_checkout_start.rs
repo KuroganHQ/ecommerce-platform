@@ -107,7 +107,7 @@ async fn waiting_on(db: &PgPool, blocker: i32) {
 impl Ctx {
     async fn switch(&self, mode: CheckoutMode) {
         let origin = self.shop.origin.as_str();
-        self.attest(origin).await;
+        self.platform_history(origin).await;
         let before = self.origin(origin).await["mode_generation"].clone();
         let (status, after) = self.set_mode(origin, mode.as_str()).await;
         assert_eq!(status, StatusCode::OK, "{after}");

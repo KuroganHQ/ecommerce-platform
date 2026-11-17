@@ -174,7 +174,11 @@ async fn strip_binding_as_before_migration(runtime: &PgPool, tenant: Uuid, token
 
 pub(crate) async fn alias(runtime: &PgPool, shop: &Shop, host: &str) -> ShopOrigin {
     sqlx::query(
-        "INSERT INTO platform.domains (hostname, tenant_id, market_id, verified_at)
+        "WITH claim AS (
+             INSERT INTO platform.hostname_claims (hostname, tenant_id, platform_issued)
+             VALUES ($1, $2, true)
+         )
+         INSERT INTO platform.domains (hostname, tenant_id, market_id, verified_at)
          VALUES ($1, $2, $3, now())",
     )
     .bind(host)
@@ -188,8 +192,7 @@ pub(crate) async fn alias(runtime: &PgPool, shop: &Shop, host: &str) -> ShopOrig
 
 pub(crate) async fn attest(runtime: &PgPool, origin: &ShopOrigin) {
     sqlx::query(
-        "UPDATE platform.checkout_origins SET history = 'merchant_attested_never_served',
-             attested_by = 'user-owner', attested_at = now(), attestation_version = 1
+        "UPDATE platform.checkout_origins SET history = 'platform_never_reassigned'
          WHERE origin = $1",
     )
     .bind(origin.as_str())

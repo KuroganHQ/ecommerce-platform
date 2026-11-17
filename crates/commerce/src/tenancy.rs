@@ -563,17 +563,16 @@ pub async fn record_origin_history(
     origin: &ShopOrigin,
     attestation_version: Option<i32>,
 ) -> Result<CheckoutOrigin, Error> {
-    let platform_issued = sqlx::query_scalar!(
-        "SELECT c.platform_issued FROM platform.checkout_origins o
-         JOIN platform.hostname_claims c ON c.hostname = o.hostname AND c.tenant_id = o.tenant_id
-         WHERE o.origin = $1 AND o.tenant_id = $2",
+    let platform = sqlx::query_scalar!(
+        r#"SELECT platform.is_platform_hostname(hostname) AS "platform!"
+           FROM platform.checkout_origins WHERE origin = $1 AND tenant_id = $2"#,
         origin.as_str(),
         tx.tenant_id()
     )
     .fetch_optional(&mut **tx)
     .await?
     .ok_or(Error::NotFound)?;
-    let (history, version) = match (platform_issued, attestation_version) {
+    let (history, version) = match (platform, attestation_version) {
         (true, None) => (OriginHistory::PlatformNeverReassigned, None),
         (true, Some(_)) => {
             return Err(Error::Conflict {

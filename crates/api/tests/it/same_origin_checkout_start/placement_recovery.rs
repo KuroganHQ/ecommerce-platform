@@ -270,19 +270,8 @@ async fn placement_note_bypass_denied(db: PgPool) {
 #[sqlx::test(migrations = "../../migrations")]
 async fn recovery_wrong_generation_denied(db: PgPool) {
     let c = setup(db, CheckoutMode::SameOrigin).await;
-    let host = "shop-alias.localhost";
-    sqlx::query(
-        "INSERT INTO platform.domains (hostname, tenant_id, market_id, verified_at)
-         VALUES ($1, $2, $3, now())",
-    )
-    .bind(host)
-    .bind(c.shop.tenant)
-    .bind(c.shop.cz)
-    .execute(&c.runtime)
-    .await
-    .unwrap();
-    let alias = format!("https://{host}");
-    c.attest(&alias).await;
+    let alias = c.claimed_host("shop-alias.localhost", true, true).await;
+    c.platform_history(&alias).await;
     let (status, body) = c.set_mode(&alias, "same_origin").await;
     assert_eq!(status, StatusCode::OK, "{body}");
     let elsewhere = Edge {

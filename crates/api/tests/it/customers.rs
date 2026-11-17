@@ -1096,8 +1096,7 @@ async fn same_origin_checkout(
     origin: &commerce::checkout_access::ShopOrigin,
 ) {
     sqlx::query(
-        "UPDATE platform.checkout_origins SET history = 'merchant_attested_never_served',
-             attested_by = 'user-owner', attested_at = now(), attestation_version = 1
+        "UPDATE platform.checkout_origins SET history = 'platform_never_reassigned'
          WHERE origin = $1",
     )
     .bind(origin.as_str())

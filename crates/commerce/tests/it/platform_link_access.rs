@@ -1,5 +1,5 @@
 use commerce::capability;
-use commerce::checkout_access::{self, ShopOrigin};
+use commerce::checkout_access;
 use commerce::link_access::{self, Scope, Source};
 use commerce::order_access::{self, Access, Credentials};
 use commerce::orders;
@@ -419,16 +419,8 @@ async fn grant_denied_on_alias_other_tenant_and_after_mode_switch(db: PgPool) {
         .await
         .unwrap();
 
-    sqlx::query(
-        "INSERT INTO platform.domains (hostname, tenant_id, market_id, verified_at)
-         VALUES ('lgalias-alias.localhost', $1, $2, now())",
-    )
-    .bind(shop.tenant)
-    .bind(shop.cz)
-    .execute(&runtime)
-    .await
-    .unwrap();
-    let alias_origin = ShopOrigin::parse("https://lgalias-alias.localhost").unwrap();
+    let alias_origin =
+        crate::checkout_access::alias(&runtime, &shop, "lgalias-alias.localhost").await;
     attest(&runtime, &alias_origin).await;
     switch(&runtime, &shop, &alias_origin, CheckoutMode::SameOrigin).await;
     let alias = crate::checkout_access::at(&shop, shop.cz, &alias_origin);

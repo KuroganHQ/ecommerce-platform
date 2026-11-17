@@ -32,7 +32,7 @@ impl Ctx {
         self.admin_on(&self.s, Call::post(path, body), OWNER).await
     }
 
-    pub(super) async fn attest(&self, origin: &str) -> Value {
+    async fn attest(&self, origin: &str) -> Value {
         let (status, body) = self
             .post(
                 HISTORY,
@@ -41,6 +41,12 @@ impl Ctx {
             .await;
         assert_eq!(status, StatusCode::OK, "{body}");
         body
+    }
+
+    pub(super) async fn platform_history(&self, origin: &str) {
+        let (status, body) = self.post(HISTORY, json!({ "origin": origin })).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body["history"], "platform_never_reassigned");
     }
 
     pub(super) async fn set_mode(&self, origin: &str, mode: &str) -> (StatusCode, Value) {
@@ -62,14 +68,20 @@ impl Ctx {
             .clone()
     }
 
-    async fn platform_host(&self, host: &str, complete: bool) -> String {
+    pub(super) async fn claimed_host(
+        &self,
+        host: &str,
+        platform_issued: bool,
+        claimed: bool,
+    ) -> String {
         sqlx::query(
             "INSERT INTO platform.hostname_claims (hostname, tenant_id, platform_issued, claimed_at)
-             VALUES ($1, $2, true, CASE WHEN $3 THEN now() END)",
+             VALUES ($1, $2, $3, CASE WHEN $4 THEN now() END)",
         )
         .bind(host)
         .bind(self.shop.tenant)
-        .bind(complete)
+        .bind(platform_issued)
+        .bind(claimed)
         .execute(&self.runtime)
         .await
         .unwrap();
@@ -180,7 +192,8 @@ async fn purge_sink() -> (api::edge::EdgePurge, Arc<Mutex<Vec<Value>>>) {
 #[sqlx::test(migrations = "../../migrations")]
 async fn attestation_records_actor_time_and_version(db: PgPool) {
     let c = setup(db, CheckoutMode::Isolated).await;
-    let origin = c.shop.origin.as_str();
+    let custom = c.alias("shop.example.cz").await.origin;
+    let origin = custom.as_str();
     assert_eq!(
         c.origin(origin).await,
         json!({ "origin": origin, "mode": "isolated", "mode_generation": 1,
@@ -214,8 +227,9 @@ async fn attestation_records_actor_time_and_version(db: PgPool) {
 async fn unknown_or_used_origins_cannot_enable(db: PgPool) {
     let c = setup(db, CheckoutMode::Isolated).await;
     let origin = c.shop.origin.as_str();
-    let used = c.platform_host("used-platform.localhost", false).await;
-    let fresh = c.platform_host("fresh-platform.localhost", true).await;
+    let used = c.claimed_host("used-platform.localhost", true, false).await;
+    let fresh = c.claimed_host("fresh-platform.localhost", true, true).await;
+    let custom = c.alias("shop.example.cz").await.origin;
     let other = testkit::storefront::shop(&c.runtime, "other").await;
     let elsewhere = other.origin.as_str();
     for (path, input, expected, code) in [
@@ -245,13 +259,13 @@ async fn unknown_or_used_origins_cannot_enable(db: PgPool) {
         ),
         (
             HISTORY,
-            json!({ "origin": origin }),
+            json!({ "origin": custom }),
             StatusCode::UNPROCESSABLE_ENTITY,
             "attestation_required",
         ),
         (
             HISTORY,
-            json!({ "origin": origin, "attestation_version": 2 }),
+            json!({ "origin": custom, "attestation_version": 2 }),
             StatusCode::UNPROCESSABLE_ENTITY,
             "unsupported_attestation_version",
         ),
@@ -306,7 +320,7 @@ async fn admin_api_rejects_forged_readiness_history_and_unauthorized_actors(db: 
     }
     assert_eq!(c.origin(origin).await["history"], "unknown_or_used");
 
-    c.attest(origin).await;
+    c.platform_history(origin).await;
     let mut unready = c.s.clone();
     unready.same_origin_ready = false;
     for (input, expected, code) in [
@@ -393,7 +407,7 @@ async fn switch_revokes_the_shop_audits_and_purges(db: PgPool) {
         origin: other.origin.as_str().to_owned(),
     };
     let elsewhere = c.handed_off_via(&other_edge, other.variants[0]).await;
-    c.attest(&origin).await;
+    c.platform_history(&origin).await;
 
     let (status, body) = c.set_mode(&origin, "same_origin").await;
     assert_eq!(status, StatusCode::OK, "{body}");
@@ -468,4 +482,36 @@ async fn switch_revokes_the_shop_audits_and_purges(db: PgPool) {
         StatusCode::NOT_FOUND,
         "revoked again"
     );
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn preexisting_platform_hostname_takes_no_merchant_attestation(db: PgPool) {
+    let c = setup(db, CheckoutMode::Isolated).await;
+    let legacy = c.claimed_host("legacy.localhost", false, false).await;
+    for (path, input, code) in [
+        (
+            HISTORY,
+            json!({ "origin": legacy, "attestation_version": 1 }),
+            "platform_hostname",
+        ),
+        (
+            HISTORY,
+            json!({ "origin": legacy }),
+            "origin_history_unknown",
+        ),
+        (
+            MODE,
+            json!({ "origin": legacy, "mode": "same_origin" }),
+            "origin_history_unknown",
+        ),
+    ] {
+        let (status, body) = c.post(path, input.clone()).await;
+        assert_eq!(
+            (status, body["code"].as_str()),
+            (StatusCode::CONFLICT, Some(code)),
+            "{path} {input}: {body}"
+        );
+    }
+    assert_eq!(c.origin(&legacy).await["history"], "unknown_or_used");
+    assert_eq!(mode_of(&c.origin(&legacy).await), ("isolated", 1));
 }
