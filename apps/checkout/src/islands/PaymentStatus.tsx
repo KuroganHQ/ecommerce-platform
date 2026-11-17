@@ -44,7 +44,6 @@ export default function PaymentStatus(props: { m: M; order: string; initial: Ord
     poll();
     const attempt = p().attempt;
     // Back from Stripe's redirect after paying: wait for the webhook, do not offer paying again.
-    // A same-origin shop's edge drops Stripe's parameters and leaves only `returned=1` (C5).
     const query = new URLSearchParams(location.search);
     const returned = query.get("redirect_status") === "succeeded" || query.get("returned") === "1";
     if (p().method === "stripe" && p().can_pay && open() && attempt && !returned) {

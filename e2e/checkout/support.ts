@@ -234,7 +234,6 @@ export async function chooseCashOnDelivery(page: Page, shipping = /PPL – kurý
   await expect(pay).toBeChecked();
 }
 
-/** The placed order's number: on the clean order page a placement lands on, or on the receipt. */
 export async function receiptNumber(page: Page, thanks = "Děkujeme za objednávku!") {
   const receipt = page.getByRole("status", { name: thanks });
   const orderPage = page.getByRole("heading", { level: 1, name: /^Objednávka \S+$/ });

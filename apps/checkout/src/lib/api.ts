@@ -76,13 +76,11 @@ export function checkoutApi(request: Request) {
 }
 
 const TOKEN = /^[0-9a-f]{64}$/;
-/** An order capability token, or the order id of a same-origin shop's clean order page. */
 const ORDER_REF = /^(?:[0-9a-f]{64}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/;
 
 export const pageToken = (request: Request) =>
   request.headers.get("x-platform-page-token") ?? undefined;
 
-/** The page token of the link grant cookie (the clean order page read by its grant). */
 export const grantPageToken = (request: Request) =>
   request.headers.get("x-platform-grant-page-token") ?? undefined;
 

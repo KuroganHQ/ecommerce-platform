@@ -1,9 +1,3 @@
-/**
- * SHOP-137 (SHOP-54 slice 10): on a same-origin shop the order page is `/o/<order id>`. The
- * placing browser reads and pays through its checkout capability, an emailed link reads through
- * a scoped grant, and no URL, history entry or referrer ever holds a secret (C1, C4, C5, C7).
- */
-
 import { expect, type Page, test } from "@playwright/test";
 import { run } from "../admin/support";
 import {
@@ -20,7 +14,6 @@ import {
 const CLEAN_ORDER = /\/o\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/;
 const REOPEN = "Otevřete prosím odkaz z e-mailu znovu";
 
-/** Every URL the tab's history exposes to same-origin script (Navigation API), and the referrer. */
 const historyTraces = (page: Page) =>
   page.evaluate(() => {
     const nav = (window as unknown as { navigation?: { entries(): { url: string | null }[] } })

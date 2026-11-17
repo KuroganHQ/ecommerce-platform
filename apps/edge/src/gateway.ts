@@ -210,7 +210,6 @@ const ORDER_OPS: { method: string; path: RegExp }[] = [
 
 const ORDER_ID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
 const ATTEMPT = "[0-9a-f-]{36}";
-/** The clean order page's operations (`/_p/orders/<order id>/*`, C4). */
 const SAME_ORIGIN_ORDER_OPS: { method: string; path: RegExp }[] = [
   { method: "GET", path: new RegExp(`^/${ORDER_ID}$`) },
   { method: "GET", path: new RegExp(`^/${ORDER_ID}/payment$`) },

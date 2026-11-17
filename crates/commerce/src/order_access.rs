@@ -1,8 +1,3 @@
-//! Who may read or pay an order on a same-origin shop (decision C4/C5): the checkout capability
-//! the order was placed with, in the origin's current checkout generation, may pay; a link grant
-//! for the order may only read. Paying as the order's customer is SHOP-95's account origin, so
-//! the shop origin accepts no session here.
-
 use platform::Error;
 use platform::db::TenantTx;
 use uuid::Uuid;
@@ -25,8 +20,6 @@ pub struct Credentials<'a> {
     pub grant: Option<&'a str>,
 }
 
-/// What `credentials` allow on `order`, `404` when nothing. Same-origin mode only; each check
-/// runs in the caller's transaction and locks what it read until commit.
 pub async fn authorize(
     tx: &mut TenantTx,
     ctx: &Context,
@@ -43,8 +36,6 @@ pub async fn authorize(
     Ok(Access::Read)
 }
 
-/// Whether `checkout` may pay `order`. An isolated shop keeps its rule: the checkout capability
-/// the order was placed with, or the session of the order's customer.
 pub async fn may_pay(
     tx: &mut TenantTx,
     ctx: &Context,
@@ -61,8 +52,6 @@ pub async fn may_pay(
     orders::may_pay(tx, order, checkout, customer).await
 }
 
-/// The order page a payment returns to: the clean `/o/<id>` on a same-origin shop, else the
-/// email link.
 pub async fn page(
     tx: &mut TenantTx,
     ctx: &Context,

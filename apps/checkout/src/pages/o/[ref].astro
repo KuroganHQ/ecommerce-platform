@@ -7,12 +7,8 @@ import PaymentStatus from "../../islands/PaymentStatus";
 import Checkout from "../../layouts/Checkout.astro";
 import { checkoutApi, grantPageToken, messages, pageToken, shopUrl } from "../../lib/api";
 
-// The order page (A4): on the checkout origin the order capability token in the path is the
-// only credential, read-only, 90 days. On a same-origin shop the path holds the order id; the
-// page's calls carry the page token of the checkout capability when it may pay, else the
-// grant's, and the edge forwards only that credential (C4/C5).
 const api = checkoutApi(Astro.request);
-const ref = Astro.params.token ?? "";
+const ref = Astro.params.ref ?? "";
 const sameOrigin = /^[0-9a-f]{8}-/.test(ref);
 const [shop, order] = await Promise.all([api.shop(), api.order(ref)]);
 const m = shop?.messages ?? {};

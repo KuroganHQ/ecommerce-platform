@@ -3,8 +3,7 @@
 //! works from the confirmation email in any browser. Paying (a new attempt, provider init)
 //! additionally needs the checkout cart capability the order was placed with (the same
 //! browser) or the session of the order's customer. The edge maps `/_p/orders/<token>/*` here
-//! and forwards both. On a same-origin shop the page is `/o/<order id>` and the path carries
-//! no credential: a link grant reads, the placing checkout capability pays (`order_access`).
+//! and forwards both.
 
 use axum::Json;
 use axum::body::Bytes;
@@ -57,7 +56,6 @@ pub(crate) struct PayerHeaders {
     x_link_grant: Option<String>,
 }
 
-/// An order path segment: the order id on a same-origin shop, else the order capability token.
 pub(super) enum OrderRef {
     Id(Uuid),
     Token(String),
@@ -91,7 +89,6 @@ pub(super) struct Authorized {
     page: String,
 }
 
-/// The order `r` names and what this requester may do with it, `404` when nothing.
 pub(super) async fn authorize(
     tx: &mut TenantTx,
     ctx: &Context,
@@ -122,7 +119,6 @@ pub(super) async fn authorize(
     }
 }
 
-/// The order, its payment view narrowed to what this requester may do.
 async fn read(
     tx: &mut TenantTx,
     ctx: &Context,
