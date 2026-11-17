@@ -63,8 +63,11 @@ impl Ctx {
     }
 
     async fn identify_start(&self, cart: &str) -> (StatusCode, Value) {
-        self.call(Call::post("/storefront/v1/checkout/identify", json!({})), cart)
-            .await
+        self.call(
+            Call::post("/storefront/v1/checkout/identify", json!({})),
+            cart,
+        )
+        .await
     }
 
     async fn identify(&self, cart: &str) -> Started {
@@ -92,7 +95,10 @@ impl Ctx {
     async fn callback(&self, cart: &str, body: Value) -> (StatusCode, String, Option<String>) {
         let (status, text, res) = self
             .edge
-            .call(Call::post("/storefront/v1/checkout/identify/callback", body))
+            .call(Call::post(
+                "/storefront/v1/checkout/identify/callback",
+                body,
+            ))
             .header("x-cart-token", cart.to_owned())
             .send_text(&self.s)
             .await;
@@ -152,10 +158,7 @@ impl Ctx {
 
     async fn assert_denied(&self, cart: &str, body: Value, what: &str) {
         let (status, text, k) = self.callback(cart, body).await;
-        assert!(
-            status.is_client_error(),
-            "{what}: {status} {text}"
-        );
+        assert!(status.is_client_error(), "{what}: {status} {text}");
         assert_eq!(k, None, "{what}: no capability");
         assert!(!holds_a_capability(&text), "{what}: {text}");
     }
@@ -187,7 +190,10 @@ async fn identify_start_mints_a_fresh_five_minute_state_bound_to_the_capability(
     .unwrap();
     drop(tx);
     assert_eq!(ttl, 300.0, "5 minutes");
-    assert!(bound, "bound to the capability, exact origin and generation");
+    assert!(
+        bound,
+        "bound to the capability, exact origin and generation"
+    );
 
     let second = c.identify(&cart).await;
     assert_ne!(first.state, second.state, "every start mints a fresh state");
@@ -197,7 +203,11 @@ async fn identify_start_mints_a_fresh_five_minute_state_bound_to_the_capability(
         "a new start revokes the checkout's earlier state"
     );
     let (status, _) = c.checkout(&cart).await;
-    assert_eq!(status, StatusCode::OK, "starting identify keeps the capability");
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "starting identify keeps the capability"
+    );
 
     let (status, _) = c.identify_start(&"f".repeat(64)).await;
     assert_eq!(status, StatusCode::NOT_FOUND, "unknown capability");
@@ -249,15 +259,36 @@ async fn missing_wrong_cookie_code_state_denied(db: PgPool) {
 
     for (body, what) in [
         (json!({ "state": s, "code": code }), "no idt cookie"),
-        (json!({ "state": s, "idt": "", "code": code }), "empty idt cookie"),
-        (json!({ "state": s, "idt": other_state, "code": code }), "another checkout's idt"),
-        (json!({ "state": s, "idt": ATTACKER_STATE, "code": code }), "a planted idt"),
+        (
+            json!({ "state": s, "idt": "", "code": code }),
+            "empty idt cookie",
+        ),
+        (
+            json!({ "state": s, "idt": other_state, "code": code }),
+            "another checkout's idt",
+        ),
+        (
+            json!({ "state": s, "idt": ATTACKER_STATE, "code": code }),
+            "a planted idt",
+        ),
         (json!({ "idt": s, "code": code }), "no state"),
-        (json!({ "state": other_state, "idt": s, "code": other_code }), "state and idt differ"),
+        (
+            json!({ "state": other_state, "idt": s, "code": other_code }),
+            "state and idt differ",
+        ),
         (json!({ "state": s, "idt": s }), "no code"),
-        (json!({ "state": s, "idt": s, "code": "f".repeat(64) }), "an unknown code"),
-        (json!({ "state": s, "idt": s, "code": placement }), "a placement code"),
-        (json!({ "state": s, "idt": s, "code": other_code }), "a code for another state"),
+        (
+            json!({ "state": s, "idt": s, "code": "f".repeat(64) }),
+            "an unknown code",
+        ),
+        (
+            json!({ "state": s, "idt": s, "code": placement }),
+            "a placement code",
+        ),
+        (
+            json!({ "state": s, "idt": s, "code": other_code }),
+            "a code for another state",
+        ),
     ] {
         c.assert_denied(&cart, body, what).await;
     }
@@ -302,15 +333,23 @@ async fn code_replay_and_expiry_denied(db: PgPool) {
     let code = c.code(&ana, "identify", &s).await;
     c.exec("UPDATE checkout_identities SET expires_at = now() - interval '1 second'")
         .await;
-    c.assert_denied(&k, json!({ "state": s, "idt": s, "code": code }), "an expired state")
-        .await;
+    c.assert_denied(
+        &k,
+        json!({ "state": s, "idt": s, "code": code }),
+        "an expired state",
+    )
+    .await;
 
     let s = c.identify(&k).await.state;
     let code = c.code(&ana, "identify", &s).await;
     c.exec("UPDATE account_codes SET expires_at = now() - interval '1 second'")
         .await;
-    c.assert_denied(&k, json!({ "state": s, "idt": s, "code": code }), "an expired code")
-        .await;
+    c.assert_denied(
+        &k,
+        json!({ "state": s, "idt": s, "code": code }),
+        "an expired code",
+    )
+    .await;
 }
 
 #[sqlx::test(migrations = "../../migrations")]
@@ -352,9 +391,10 @@ async fn concurrent_callbacks_have_one_winner(db: PgPool) {
         let (cart, s, code) = (cart.clone(), s.clone(), code.clone());
         async move {
             let mut tx = platform::db::tenant_tx(&runtime, tenant).await.unwrap();
-            let mut ctx = storefront::context(&mut tx, &PublicUrls::default(), cz, None, Utc::now())
-                .await
-                .unwrap();
+            let mut ctx =
+                storefront::context(&mut tx, &PublicUrls::default(), cz, None, Utc::now())
+                    .await
+                    .unwrap();
             ctx.origin = Some(origin);
             commerce::checkout_identity::callback(&mut tx, &ctx, &cart, &s, &s, &code).await
         }
@@ -409,15 +449,27 @@ async fn identify_prefill_has_no_account_visibility_or_side_effects(db: PgPool) 
     let (ana, ana_id) = c.signed_in("ana@example.cz").await;
     c.save_address(&ana, "Ana Saved").await;
     let before = c.account_state(&ana, ana_id).await;
-    assert_eq!(c.saved_names(&cart).await, Vec::<String>::new(), "no prefill before identify");
+    assert_eq!(
+        c.saved_names(&cart).await,
+        Vec::<String>::new(),
+        "no prefill before identify"
+    );
 
     let s = c.identify(&cart).await.state;
     let code = c.code(&ana, "identify", &s).await;
     let k = c.identified(&cart, &s, &code).await;
     let (status, _) = c.checkout(&cart).await;
-    assert_eq!(status, StatusCode::NOT_FOUND, "identify rotated the capability (C6)");
+    assert_eq!(
+        status,
+        StatusCode::NOT_FOUND,
+        "identify rotated the capability (C6)"
+    );
     let (status, _) = c.saved(&cart).await;
-    assert_eq!(status, StatusCode::NOT_FOUND, "the old capability reads no prefill");
+    assert_eq!(
+        status,
+        StatusCode::NOT_FOUND,
+        "the old capability reads no prefill"
+    );
     let (status, body) = c.saved(&k).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["items"][0]["name"], "Ana Saved");
@@ -425,19 +477,29 @@ async fn identify_prefill_has_no_account_visibility_or_side_effects(db: PgPool) 
 
     let k = c.rotated(&k, contact("guest@example.cz")).await;
     let k = c.rotated(&k, addresses("Typed Name")).await;
-    assert_eq!(c.saved_names(&k).await, ["Ana Saved"], "the hint survives rotation");
+    assert_eq!(
+        c.saved_names(&k).await,
+        ["Ana Saved"],
+        "the hint survives rotation"
+    );
     let view = c.ready(&k, method).await;
     let (status, text, _) = c.place(&k, "identify-order", &place_body(&view, "")).await;
     assert_eq!(status, StatusCode::CREATED, "{text}");
 
-    assert_eq!(c.account_state(&ana, ana_id).await, before, "the account saw nothing");
     assert_eq!(
-        c.count("SELECT count(*) FROM carts WHERE customer_id IS NOT NULL").await,
+        c.account_state(&ana, ana_id).await,
+        before,
+        "the account saw nothing"
+    );
+    assert_eq!(
+        c.count("SELECT count(*) FROM carts WHERE customer_id IS NOT NULL")
+            .await,
         0,
         "no cart is attached to the account"
     );
     assert_eq!(
-        c.count("SELECT count(*) FROM orders WHERE customer_id IS NOT NULL").await,
+        c.count("SELECT count(*) FROM orders WHERE customer_id IS NOT NULL")
+            .await,
         0,
         "the order is a guest order"
     );
@@ -471,7 +533,9 @@ impl Ctx {
             addresses: get("/storefront/v1/customer/addresses").await,
             sessions: self.count("SELECT count(*) FROM customer_sessions").await,
             consent: self.count("SELECT count(*) FROM consent_records").await,
-            customer_updated: self.read("SELECT updated_at FROM customers WHERE id = $1", id).await,
+            customer_updated: self
+                .read("SELECT updated_at FROM customers WHERE id = $1", id)
+                .await,
         }
     }
 }
@@ -508,8 +572,16 @@ async fn failed_identify_rolls_back_state_and_code_consumption(db: PgPool) {
         .await;
     assert!(status.is_server_error(), "{status} {text}");
     assert_eq!(k, None);
-    assert_eq!(c.unconsumed().await, (1, 1), "state and code stay unconsumed");
-    assert_eq!(c.saved_names(&cart).await, Vec::<String>::new(), "no prefill link");
+    assert_eq!(
+        c.unconsumed().await,
+        (1, 1),
+        "state and code stay unconsumed"
+    );
+    assert_eq!(
+        c.saved_names(&cart).await,
+        Vec::<String>::new(),
+        "no prefill link"
+    );
     let (status, _) = c.checkout(&cart).await;
     assert_eq!(status, StatusCode::OK, "the capability did not rotate");
 
