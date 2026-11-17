@@ -51,6 +51,8 @@ export function contentSecurityPolicy(
      * pay (the checkout and the order page), never on account pages (WP11).
      */
     stripe?: boolean;
+    /** The account origin the checkout's sign-in form redirects to (A2 step 1). */
+    formOrigin?: string;
     /** Who may frame the page (theme previews: the admin origin, A21); default nobody. */
     frameAncestors?: string;
   },
@@ -87,7 +89,7 @@ export function contentSecurityPolicy(
     `connect-src 'self'${opts.stripe ? " https://api.stripe.com" : ""}`,
     // Pickup-point widget and Stripe Payment Element (spec §9.4), loaded on interaction only.
     `frame-src${opts.stripe ? " https://js.stripe.com https://*.js.stripe.com https://hooks.stripe.com" : ""} ${widget}`,
-    "form-action 'self'",
+    `form-action 'self'${opts.formOrigin ? ` ${opts.formOrigin}` : ""}`,
   ].join("; ");
 }
 

@@ -41,6 +41,18 @@ import {
   workerResponseHeaders,
 } from "./headers.ts";
 import {
+  accountOrigin,
+  CLEAR_IDT_COOKIE,
+  callbackParameters,
+  IDENTIFY_CALLBACK,
+  IDENTIFY_FAILED,
+  IDENTIFY_START,
+  IDT_COOKIE,
+  identifyUrl,
+  idtCookie,
+  isIdentifyValue,
+} from "./identify.ts";
+import {
   cleanUrl,
   grantCookie,
   isOrderPage,
@@ -1265,6 +1277,55 @@ ${
     return new Response(null, { status: 303, headers: { location } });
   }
 
+  async function identifyStart(site: SameOriginSite, req: Request): Promise<Response> {
+    const posted = await checkoutNavigation(site, req);
+    if (posted instanceof Response) return posted;
+    const account = accountOrigin(site);
+    if (!account) return seeOther(IDENTIFY_FAILED);
+    const res = await upstream(
+      new Request(`${opts.apiOrigin}/storefront/v1/checkout/identify`, {
+        method: "POST",
+        headers: apiHeaders(site, { "x-cart-token": posted.cart }),
+      }),
+    );
+    if (res.status !== 201) {
+      await res.body?.cancel().catch(() => undefined);
+      return seeOther(res.status === 404 || res.status === 409 ? "/checkout" : IDENTIFY_FAILED);
+    }
+    const state = ((await res.json().catch(() => null)) as { state?: unknown } | null)?.state;
+    if (!isIdentifyValue(state)) return seeOther(IDENTIFY_FAILED);
+    return new Response(null, {
+      status: 303,
+      headers: {
+        location: identifyUrl(account, state, site.shopOrigin),
+        "cache-control": "no-store",
+        "set-cookie": idtCookie(state),
+      },
+    });
+  }
+
+  async function identifyCallback(site: SameOriginSite, req: Request, url: URL) {
+    if (req.method !== "GET") return text(405, "Method not allowed", { allow: "GET" });
+    const params = callbackParameters(url);
+    const cart = capabilityCookie(req, SAME_ORIGIN_CART_COOKIE);
+    const idt = capabilityCookie(req, IDT_COOKIE);
+    if (!params || !cart || !idt) return seeOther(IDENTIFY_FAILED);
+    const res = await upstream(
+      new Request(`${opts.apiOrigin}/storefront/v1/checkout/identify/callback`, {
+        method: "POST",
+        headers: apiHeaders(site, { "x-cart-token": cart, "content-type": "application/json" }),
+        body: JSON.stringify({ state: params.state, idt, code: params.code }),
+      }),
+    );
+    const rotated = res.headers.get("x-cart-token");
+    await res.body?.cancel().catch(() => undefined);
+    if (res.status !== 204 || !rotated || !TOKEN_RE.test(rotated)) return seeOther(IDENTIFY_FAILED);
+    const headers = new Headers({ location: "/checkout", "cache-control": "no-store" });
+    headers.append("set-cookie", sameOriginCartCookie(rotated));
+    headers.append("set-cookie", CLEAR_IDT_COOKIE);
+    return new Response(null, { status: 303, headers });
+  }
+
   async function placeOrder(site: SameOriginSite, req: Request): Promise<Response> {
     const toCheckout = (headers: Record<string, string> = {}) =>
       new Response(null, { status: 303, headers: { location: "/checkout", ...headers } });
@@ -1787,6 +1848,8 @@ ${
         status: 400,
         headers: { "content-type": "text/html; charset=utf-8" },
       });
+    if (url.pathname === IDENTIFY_CALLBACK) return identifyCallback(site, req, url);
+    if (url.pathname === IDENTIFY_START) return identifyStart(site, req);
     const ingress = linkIngress(url);
     if (ingress) {
       if (req.method !== "GET") return text(405, "Method not allowed", { allow: "GET" });
@@ -1853,11 +1916,17 @@ ${
     form?: URLSearchParams,
   ): Promise<Response> {
     const cartToken = capabilityCookie(req, SAME_ORIGIN_CART_COOKIE);
-    return renderPlatform(site, req, url, {
-      cartToken,
-      pageToken: pageToken(opts.pageTokenSecret, site.shopOrigin, cartToken),
-      form,
-    });
+    return renderPlatform(
+      site,
+      req,
+      url,
+      {
+        cartToken,
+        pageToken: pageToken(opts.pageTokenSecret, site.shopOrigin, cartToken),
+        form,
+      },
+      accountOrigin(site) ?? undefined,
+    );
   }
 
   async function renderPlatform(
@@ -1865,6 +1934,7 @@ ${
     req: Request,
     url: URL,
     extra: Parameters<typeof render>[3],
+    formOrigin?: string,
   ): Promise<Response> {
     const artifact = site.checkout_artifact ?? opts.checkoutArtifact;
     if (!artifact || !opts.pageTokenSecret)
@@ -1882,6 +1952,7 @@ ${
       styleHashes: m.csp.style_hashes,
       widgetOrigin,
       stripe: true,
+      ...(formOrigin ? { formOrigin } : {}),
     });
     r.headers.set("content-security-policy", csp);
     return new Response(req.method === "HEAD" ? null : r.body, {
@@ -1895,12 +1966,11 @@ ${
   function legacyAccountRedirect(site: Site, url: URL): Response | null {
     const page = ACCOUNT_PAGE_RE.exec(url.pathname)?.[0];
     if (!page) return null;
-    if (!site.account_host || !site.shopOrigin) return text(404, "Not found");
-    const target = new URL(site.shopOrigin);
-    target.hostname = site.account_host;
+    const target = accountOrigin(site);
+    if (!target) return text(404, "Not found");
     return new Response(null, {
       status: 308,
-      headers: { location: `${target.origin}${page}${url.search}`, "cache-control": "no-store" },
+      headers: { location: `${target}${page}${url.search}`, "cache-control": "no-store" },
     });
   }
 
