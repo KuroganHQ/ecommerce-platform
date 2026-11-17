@@ -4,9 +4,10 @@ use super::*;
 pub(super) struct Placed {
     shop_token: String,
     rotated_away: [String; 2],
-    presented: String,
-    current: String,
+    pub(super) presented: String,
+    pub(super) current: String,
     body: Value,
+    pub(super) order: Value,
     pub(super) number: Value,
     cart: Uuid,
 }
@@ -64,6 +65,7 @@ impl Ctx {
             presented: k2,
             body,
             number: placed["number"].clone(),
+            order: placed,
             cart: cart_id(&view),
         }
     }

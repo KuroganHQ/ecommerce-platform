@@ -231,7 +231,7 @@ async fn links(
     get,
     path = "/storefront/v1/orders/{token}/documents",
     tag = "storefront",
-    params(StorefrontHeaders, ("token" = String, Path, description = "Order capability token")),
+    params(StorefrontHeaders, super::orders::PayerHeaders, ("token" = String, Path, description = "Order capability token, or the order id on a same-origin shop")),
     responses(
         (status = 200, body = DocumentLinks),
         (status = 404, body = platform::Problem, content_type = "application/problem+json"),
@@ -240,12 +240,13 @@ async fn links(
 async fn order_documents(
     shopper: Shopper,
     State(s): State<AppState>,
+    headers: HeaderMap,
     path: Result<Path<String>, PathRejection>,
 ) -> Result<Response, Error> {
-    let t = token(path)?;
-    let docs = with_ctx(&s, &shopper, async |tx, _| {
-        let order = orders::by_token(tx, &t).await?;
-        invoicing::rendered_for_order(tx, order).await
+    let r = super::orders::order_ref(path)?;
+    let docs = with_ctx(&s, &shopper, async |tx, ctx| {
+        let a = super::orders::authorize(tx, ctx, &headers, &r).await?;
+        invoicing::rendered_for_order(tx, a.order).await
     })
     .await?;
     Ok(no_store(Json(links(&s, docs).await?).into_response()))

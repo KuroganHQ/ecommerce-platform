@@ -77,7 +77,7 @@ fn contact(email: &str) -> ContactInput {
     }
 }
 
-async fn shop_cart(runtime: &PgPool, at: &At, shop: &Shop) -> String {
+pub(crate) async fn shop_cart(runtime: &PgPool, at: &At, shop: &Shop) -> String {
     at.run(runtime, async |tx, ctx| {
         let (_, token) = cart::create(tx, ctx).await.unwrap();
         let c = cart::find(tx, ctx, &token).await.unwrap();

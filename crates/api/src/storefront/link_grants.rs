@@ -1,10 +1,9 @@
 use axum::Json;
 use axum::body::Bytes;
-use axum::extract::{Path, State};
+use axum::extract::State;
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use commerce::link_access::{self, Scope, Source};
-use commerce::orders::{self, OrderView};
 use commerce::withdrawals::{self, LinkRequest};
 use platform::Error;
 use serde::{Deserialize, Serialize};
@@ -18,12 +17,11 @@ use super::{Shopper, StorefrontHeaders, with_ctx};
 use crate::AppState;
 use crate::admin::parse_json;
 
-const GRANT_HEADER: &str = "x-link-grant";
+pub(super) const GRANT_HEADER: &str = "x-link-grant";
 
 pub fn routes() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
         .routes(routes!(exchange))
-        .routes(routes!(order))
         .routes(routes!(request_withdrawal))
 }
 
@@ -107,34 +105,6 @@ async fn exchange(
         HeaderValue::from_str(&granted.token).map_err(|e| Error::Internal(e.to_string()))?,
     );
     Ok(no_store(res))
-}
-
-/// The order a grant may read. Paying stays with the checkout capability or the customer.
-#[utoipa::path(
-    get,
-    path = "/storefront/v1/link-grants/orders/{id}",
-    tag = "storefront",
-    params(StorefrontHeaders, GrantHeader, ("id" = Uuid, Path)),
-    responses(
-        (status = 200, body = OrderView),
-        (status = 404, description = "no grant for this order", body = platform::Problem, content_type = "application/problem+json"),
-    )
-)]
-async fn order(
-    shopper: Shopper,
-    State(s): State<AppState>,
-    headers: HeaderMap,
-    Path(id): Path<Uuid>,
-) -> Result<Response, Error> {
-    let g = grant(&headers)?;
-    let mut view = with_ctx(&s, &shopper, async |tx, ctx| {
-        link_access::authorize(tx, ctx, g, Scope::OrderRead(id)).await?;
-        orders::view(tx, id).await
-    })
-    .await?;
-    view.payment.can_pay = false;
-    view.payment.can_retry = false;
-    Ok(no_store(Json(view).into_response()))
 }
 
 /// The public withdrawal form's request (as `POST /withdrawals`, always `202`). It completes

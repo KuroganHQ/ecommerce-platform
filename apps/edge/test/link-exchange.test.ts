@@ -227,8 +227,11 @@ describe("every C5 parameter is stripped before a platform page renders", () => 
         `${FRESH}${page}?error=stale_page&${name}=${SECRET}&${name}=${SECRET}`,
         NAVIGATE,
       );
+      const stripeReturn = !["token", "t", "code"].includes(name);
       expect(res.status).toBe(303);
-      expect(res.headers.get("location")).toBe(`${page}?error=stale_page`);
+      expect(res.headers.get("location")).toBe(
+        `${page}?error=stale_page${stripeReturn ? "&returned=1" : ""}`,
+      );
       expect(res.headers.get("cache-control")).toBe("no-store");
       expect(res.headers.getSetCookie()).toEqual([]);
       expectNoSecret(res, await res.text(), name);
@@ -292,11 +295,13 @@ describe("the clean order URL", () => {
   test("with a grant it renders through the grant alone", async () => {
     const res = await get(`${FRESH}/o/${ORDER_ID}`, {
       ...NAVIGATE,
-      cookie: `__Host-Http-cap=${LINK_GRANT}; __Host-Http-cart=${CART}`,
+      cookie: `__Host-Http-cap=${LINK_GRANT}`,
     });
     expect(res.status).toBe(200);
     const html = await res.text();
-    expect(html).not.toContain("page-token");
+    const names = /<p id="headers">(.*?)<\/p>/.exec(html)?.[1]?.split(",") ?? [];
+    expect(names, "the grant's page token only").toContain("x-platform-grant-page-token");
+    expect(names).not.toContain("x-platform-page-token");
     expect(html).not.toContain(LINK_GRANT);
     const reads = api.calls.filter((c) =>
       c.url.startsWith("http://api.test/storefront/v1/checkout"),

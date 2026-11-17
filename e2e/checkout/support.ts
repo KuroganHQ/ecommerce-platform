@@ -236,6 +236,12 @@ export async function chooseCashOnDelivery(page: Page, shipping = /PPL – kurý
 
 export async function receiptNumber(page: Page, thanks = "Děkujeme za objednávku!") {
   const receipt = page.getByRole("status", { name: thanks });
+  const orderPage = page.getByRole("heading", { level: 1, name: /^Objednávka \S+$/ });
+  await expect(receipt.or(orderPage)).toBeVisible();
+  if (await orderPage.isVisible()) {
+    await expect(page.getByText(thanks)).toBeVisible();
+    return /^Objednávka (\S+)$/.exec(await orderPage.innerText())?.[1] ?? "";
+  }
   await expect(receipt).toBeFocused();
   const number = /Objednávka (\S+)/.exec(await receipt.innerText())?.[1];
   expect(number, "the receipt names the order").toBeTruthy();

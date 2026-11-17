@@ -1,6 +1,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 
 export const WORKER_PAGE_TOKEN_HEADER = "x-platform-page-token";
+export const WORKER_GRANT_PAGE_TOKEN_HEADER = "x-platform-grant-page-token";
 export const CLIENT_PAGE_TOKEN_HEADER = "x-page-token";
 
 export function pageToken(

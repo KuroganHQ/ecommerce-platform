@@ -623,9 +623,7 @@ test("same-origin checkout in CZ: native forms, review and a cash-on-delivery or
     page.keyboard.press("Enter"),
   ]);
   const number = await receiptNumber(page);
-  await expect(page.getByRole("status", { name: "Děkujeme za objednávku!" })).toContainText(
-    `Potvrzení pošleme na ${email}`,
-  );
+  await expect(page.getByText(`Potvrzení jsme poslali na ${email}.`)).toBeVisible();
   expect(
     requests.filter((r) => r.method === "POST" && r.path === "/checkout/place-order"),
     "exactly one placement post",
@@ -638,22 +636,27 @@ test("same-origin checkout in CZ: native forms, review and a cash-on-delivery or
   expect(posted.get("notes")).toBe(note);
   const answer = await placed.response();
   expect(answer?.status(), "the placement answer").toBe(303);
-  expect(await answer?.headerValue("location")).toBe("/checkout");
+  expect(await answer?.headerValue("location"), "the clean order page").toMatch(
+    /^\/o\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+  );
   const replaced = await cookieValue(context, CART);
   expect(replaced, "the note replaced the capability").toMatch(CAPABILITY);
   expect(replaced).not.toBe(held);
   expect(await answer?.headerValue("set-cookie"), "set by the placement answer").toContain(
     `${CART}=${replaced};`,
   );
-  await expect(pageTokenMeta(page), "the receipt carries no page token").toHaveCount(0);
-  await expectAccessible(page, "same-origin receipt");
+  await expect(pageTokenMeta(page), "the payer's page token").not.toHaveAttribute(
+    "content",
+    reviewToken ?? "",
+  );
+  await expectAccessible(page, "same-origin order page");
   await expectShopOnly(page);
   expect(
     sql(
       `SELECT concat_ws('|', notes, payment_method, email) FROM orders WHERE number = '${number}'`,
     ),
   ).toBe(`${note}|cod|${email}`);
-  expect(requests.filter((r) => /^\/(o|_p\/fake-pay)\//.test(r.path))).toEqual([]);
+  expect(requests.filter((r) => r.path.startsWith("/_p/fake-pay/"))).toEqual([]);
   await expectNothingStored(page, writes);
   await context.close();
 });
@@ -699,7 +702,7 @@ test("a placement whose answer is lost after the commit shows its receipt on rel
   await acceptAndPlace(page);
   await aborted;
   expect(lost.answer?.status(), "the replayed placement commits").toBe(303);
-  expect(lost.answer?.headers().location).toBe("/checkout");
+  expect(lost.answer?.headers().location).toMatch(/^\/o\/[0-9a-f-]{36}$/);
   const replacement = new RegExp(`${CART}=([0-9a-f]{64});`).exec(
     lost.answer?.headers()["set-cookie"] ?? "",
   )?.[1];
@@ -862,8 +865,8 @@ test("same-origin checkout at phone and tablet widths", async ({ browser }) => {
       await chooseCashOnDelivery(page);
       await acceptAndPlace(page);
       await receiptNumber(page);
-      await expect(page.getByRole("status", { name: "Děkujeme za objednávku!" })).toBeInViewport();
-      await noOverflow("receipt");
+      await expect(page.getByText("Děkujeme za objednávku!")).toBeInViewport();
+      await noOverflow("order page");
     }
     await context.close();
   }
