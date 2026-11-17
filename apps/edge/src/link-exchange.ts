@@ -21,13 +21,32 @@ const ORDER_PAGE = /^\/o\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-
 export const WITHDRAWAL_PAGE = "/withdraw/declaration";
 export const REVIEW_PAGE = "/review";
 
-const ACTION_LINKS = new Map<string, { parameter: string; kind: "withdrawal" | "review" }>([
-  ["/withdraw", { parameter: "t", kind: "withdrawal" }],
-  ["/review", { parameter: "token", kind: "review" }],
-]);
+type ActionKind =
+  | "withdrawal"
+  | "review"
+  | "newsletter_confirmation"
+  | "newsletter_preferences"
+  | "watch_confirmation"
+  | "watch_unsubscribe"
+  | "flow_unsubscribe"
+  | "restore_cart";
+
+const ACTION_LINKS: Record<ActionKind, { page: string; parameter: string; clean?: string }> = {
+  withdrawal: { page: "/withdraw", parameter: "t", clean: WITHDRAWAL_PAGE },
+  review: { page: REVIEW_PAGE, parameter: "token" },
+  newsletter_confirmation: { page: "/newsletter/confirm", parameter: "token" },
+  newsletter_preferences: { page: "/newsletter", parameter: "t" },
+  watch_confirmation: { page: "/watch/confirm", parameter: "token" },
+  watch_unsubscribe: { page: "/watch/unsubscribe", parameter: "token" },
+  flow_unsubscribe: { page: "/flows/unsubscribe", parameter: "token" },
+  restore_cart: { page: "/restore-cart", parameter: "token" },
+};
+const ACTION_PAGES = new Map(
+  Object.entries(ACTION_LINKS).map(([kind, a]) => [a.page, { ...a, kind: kind as ActionKind }]),
+);
 const LINK_TOKEN = /^[0-9a-f]{64}$/;
 
-export type Link = { kind: "order" | "withdrawal" | "review"; token: string };
+export type Link = { kind: "order" | ActionKind; token: string };
 export type LinkIngress =
   | { kind: "exchange"; link: Link }
   | { kind: "redirect"; location: string }
@@ -50,7 +69,7 @@ export function linkIngress(url: URL): LinkIngress | null {
       ? { kind: "exchange", link: { kind: "order", token } }
       : { kind: "redirect", location: REOPEN_LINK_PATH };
   }
-  const action = ACTION_LINKS.get(url.pathname);
+  const action = ACTION_PAGES.get(url.pathname);
   if (action && url.searchParams.has(action.parameter)) {
     const tokens = url.searchParams.getAll(action.parameter);
     const others = [...url.searchParams.keys()].filter(
@@ -71,18 +90,92 @@ export function linkIngress(url: URL): LinkIngress | null {
 }
 
 export const failedLink = (kind: Link["kind"]) =>
-  kind === "order"
-    ? REOPEN_LINK_PATH
-    : `${kind === "review" ? REVIEW_PAGE : "/withdraw"}?link=invalid`;
+  kind === "order" ? REOPEN_LINK_PATH : `${ACTION_LINKS[kind].page}?link=invalid`;
 
 export function cleanUrl(resource: unknown): string | null {
   const r = resource as { kind?: unknown; id?: unknown } | null | undefined;
-  if (r?.kind === "withdrawal") return WITHDRAWAL_PAGE;
-  if (r?.kind === "review") return REVIEW_PAGE;
+  const action =
+    typeof r?.kind === "string" && Object.hasOwn(ACTION_LINKS, r.kind)
+      ? ACTION_LINKS[r.kind as ActionKind]
+      : null;
+  if (action) return action.clean ?? action.page;
   if (r?.kind !== "order" || typeof r.id !== "string") return null;
   const path = `/o/${r.id}`;
   return isOrderPage(path) ? path : null;
 }
+
+export const NEWSLETTER_CLICK = "/newsletter/click";
+export const ONE_CLICK_PREFIX = "/_p/unsubscribe/";
+export const RESTORE_PAGE = "/restore-cart";
+
+export interface GrantForm {
+  api: string;
+  page: string;
+  done: string;
+}
+
+export const GRANT_FORMS: ReadonlyMap<string, GrantForm> = new Map([
+  [
+    "/newsletter/confirm",
+    {
+      api: "/link-grants/newsletter-confirmation",
+      page: "/newsletter/confirm",
+      done: "/newsletter/confirm?done=1",
+    },
+  ],
+  [
+    "/newsletter/unsubscribe",
+    {
+      api: "/link-grants/newsletter-preferences/unsubscribe",
+      page: "/newsletter",
+      done: "/newsletter?done=unsubscribed",
+    },
+  ],
+  [
+    "/newsletter/resubscribe",
+    {
+      api: "/link-grants/newsletter-preferences/resubscribe",
+      page: "/newsletter",
+      done: "/newsletter?done=resubscribed",
+    },
+  ],
+  [
+    "/watch/confirm",
+    {
+      api: "/link-grants/watch-confirmation",
+      page: "/watch/confirm",
+      done: "/watch/confirm?done=1",
+    },
+  ],
+  [
+    "/watch/unsubscribe",
+    {
+      api: "/link-grants/watch-unsubscribe",
+      page: "/watch/unsubscribe",
+      done: "/watch/unsubscribed",
+    },
+  ],
+  [
+    "/flows/unsubscribe",
+    {
+      api: "/link-grants/flow-unsubscribe",
+      page: "/flows/unsubscribe",
+      done: "/flows/unsubscribed",
+    },
+  ],
+  [RESTORE_PAGE, { api: "/link-grants/restore-cart", page: RESTORE_PAGE, done: "/checkout" }],
+]);
+
+export const GRANT_PAGES: ReadonlySet<string> = new Set([
+  "/newsletter",
+  "/newsletter/confirm",
+  "/watch/confirm",
+  "/watch/unsubscribe",
+  "/watch/unsubscribed",
+  "/flows/unsubscribe",
+  "/flows/unsubscribed",
+  RESTORE_PAGE,
+]);
 
 export const grantCookie = (grant: string) =>
   `${LINK_GRANT_COOKIE}=${grant}; Path=/; HttpOnly; Secure; SameSite=Lax`;

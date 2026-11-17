@@ -40,6 +40,7 @@ use crate::capability;
 use crate::catalog::{check_text, sanitize_html};
 use crate::consent::{self, ConsentPurpose, Subject};
 use crate::content::blocks::href_ok;
+use crate::link_access::{self, Scope};
 use crate::markets::invalid;
 use crate::media::AssetVariant;
 use crate::notifications::{self, Brand, Rendered, Stored};
@@ -1465,14 +1466,23 @@ async fn by_token(tx: &mut TenantTx, token: &str) -> Result<Sent, Error> {
     if !capability::well_formed(token) {
         return Err(Error::NotFound);
     }
+    by_link(tx, &capability::hash(token)).await
+}
+
+async fn by_link(tx: &mut TenantTx, link: &[u8]) -> Result<Sent, Error> {
     sqlx::query_as!(
         Sent,
         "SELECT id, subscriber_id FROM campaign_sends WHERE token_hash = $1",
-        capability::hash(token)
+        link
     )
     .fetch_optional(&mut **tx)
     .await?
     .ok_or(Error::NotFound)
+}
+
+async fn by_grant(tx: &mut TenantTx, ctx: &Context, grant: &str) -> Result<Sent, Error> {
+    let link = link_access::read_link(tx, ctx, grant, Scope::NewsletterPreferences).await?;
+    by_link(tx, &link).await
 }
 
 /// The preference page's view of a subscription.
@@ -1485,6 +1495,19 @@ pub struct Preferences {
 
 pub async fn preferences(tx: &mut TenantTx, token: &str) -> Result<Preferences, Error> {
     let s = by_token(tx, token).await?;
+    preferences_of(tx, s).await
+}
+
+pub async fn preferences_by_grant(
+    tx: &mut TenantTx,
+    ctx: &Context,
+    grant: &str,
+) -> Result<Preferences, Error> {
+    let s = by_grant(tx, ctx, grant).await?;
+    preferences_of(tx, s).await
+}
+
+async fn preferences_of(tx: &mut TenantTx, s: Sent) -> Result<Preferences, Error> {
     let sub = subscribers::get(tx, s.subscriber_id).await?;
     Ok(Preferences {
         email: subscribers::mask(&sub.email),
@@ -1499,6 +1522,24 @@ pub async fn unsubscribe(
     ip_hash: Option<&[u8]>,
 ) -> Result<Preferences, Error> {
     let s = by_token(tx, token).await?;
+    unsubscribe_send(tx, s, ip_hash).await
+}
+
+pub async fn unsubscribe_by_grant(
+    tx: &mut TenantTx,
+    ctx: &Context,
+    grant: &str,
+    ip_hash: Option<&[u8]>,
+) -> Result<Preferences, Error> {
+    let s = by_grant(tx, ctx, grant).await?;
+    unsubscribe_send(tx, s, ip_hash).await
+}
+
+async fn unsubscribe_send(
+    tx: &mut TenantTx,
+    s: Sent,
+    ip_hash: Option<&[u8]>,
+) -> Result<Preferences, Error> {
     let sub = subscribers::unsubscribe(tx, s.subscriber_id, "unsubscribe", ip_hash)
         .await?
         .ok_or(Error::NotFound)?;
@@ -1522,6 +1563,25 @@ pub async fn resubscribe(
     ip_hash: Option<&[u8]>,
 ) -> Result<(), Error> {
     let s = by_token(tx, token).await?;
+    resubscribe_send(tx, ctx, s, ip_hash).await
+}
+
+pub async fn resubscribe_by_grant(
+    tx: &mut TenantTx,
+    ctx: &Context,
+    grant: &str,
+    ip_hash: Option<&[u8]>,
+) -> Result<(), Error> {
+    let s = by_grant(tx, ctx, grant).await?;
+    resubscribe_send(tx, ctx, s, ip_hash).await
+}
+
+async fn resubscribe_send(
+    tx: &mut TenantTx,
+    ctx: &Context,
+    s: Sent,
+    ip_hash: Option<&[u8]>,
+) -> Result<(), Error> {
     let sub = subscribers::get(tx, s.subscriber_id).await?;
     subscribers::subscribe(tx, ctx, &sub.email, ip_hash, "resubscribe").await
 }

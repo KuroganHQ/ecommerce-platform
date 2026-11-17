@@ -58,14 +58,20 @@ import {
 import {
   cleanUrl,
   failedLink,
+  GRANT_FORMS,
+  GRANT_PAGES,
+  type GrantForm,
   grantCookie,
   isOrderPage,
   LINK_GRANT_COOKIE,
   LINK_GRANT_HEADER,
   type Link,
   linkIngress,
+  NEWSLETTER_CLICK,
+  ONE_CLICK_PREFIX,
   REOPEN_LINK_PAGE,
   REOPEN_LINK_PATH,
+  RESTORE_PAGE,
   REVIEW_PAGE,
   WITHDRAWAL_PAGE,
 } from "./link-exchange.ts";
@@ -1218,6 +1224,15 @@ ${
       new Response(null, { status: 303, headers: { location: "/", "cache-control": "no-store" } });
     const shopCart = capabilityCookie(req, SHOP_CART_COOKIE);
     if (!shopCart) return backToShop();
+    return startCheckout(site, req, shopCart, backToShop);
+  }
+
+  async function startCheckout(
+    site: SameOriginSite,
+    req: Request,
+    shopCart: string,
+    backToShop: () => Response,
+  ): Promise<Response> {
     const previous = capabilityCookie(req, SAME_ORIGIN_CART_COOKIE);
     const res = await upstream(
       new Request(`${opts.apiOrigin}/storefront/v1/cart/checkout`, {
@@ -2013,6 +2028,7 @@ ${
     if (url.pathname === IDENTIFY_CALLBACK) return identifyCallback(site, req, url);
     if (url.pathname === IDENTIFY_START) return identifyStart(site, req);
     if (url.pathname === PLACEMENT_CALLBACK) return placementCallback(site, req, url);
+    if (url.pathname === NEWSLETTER_CLICK) return newsletterClick(site, req, url);
     const ingress = linkIngress(url);
     if (ingress) {
       if (req.method !== "GET") return text(405, "Method not allowed", { allow: "GET" });
@@ -2029,6 +2045,9 @@ ${
     if (url.pathname === WITHDRAWAL_PAGE) return grantPage(site, req, url);
     if (url.pathname === REVIEW_PAGE)
       return req.method === "POST" ? reviewForm(site, req) : grantPage(site, req, url);
+    const grantForm = GRANT_FORMS.get(url.pathname);
+    if (grantForm && req.method === "POST") return grantFormPost(site, req, grantForm);
+    if (GRANT_PAGES.has(url.pathname)) return grantPage(site, req, url);
     if (url.pathname === PLACE_ORDER_FORM) return placeOrder(site, req);
     const form = CHECKOUT_FORMS.get(url.pathname);
     if (form) return checkoutForm(site, req, form);
@@ -2144,6 +2163,76 @@ ${
     return seeOther(`${REVIEW_PAGE}?error=${error}`);
   }
 
+  async function grantFormPost(
+    site: SameOriginSite,
+    req: Request,
+    action: GrantForm,
+  ): Promise<Response> {
+    const form = await navigationForm(site, req);
+    if (form instanceof Response) return form;
+    const grant = capabilityCookie(req, LINK_GRANT_COOKIE);
+    if (
+      !grant ||
+      form.getAll("_pt").length !== 1 ||
+      !verifyPageToken(opts.pageTokenSecret, site.shopOrigin, grant, form.get("_pt"))
+    )
+      return seeOther(action.page);
+    const res = await upstream(
+      new Request(`${opts.apiOrigin}/storefront/v1${action.api}`, {
+        method: "POST",
+        headers: apiHeaders(site, { [LINK_GRANT_HEADER]: grant }),
+      }),
+    );
+    if (!res.ok || action.page !== RESTORE_PAGE) {
+      await res.body?.cancel().catch(() => undefined);
+      if (res.status === 404) return seeOther(`${action.page}?link=invalid`);
+      return seeOther(res.ok ? action.done : `${action.page}?error=1`);
+    }
+    const restored = ((await res.json().catch(() => null)) as { cart_token?: unknown } | null)
+      ?.cart_token;
+    if (typeof restored !== "string" || !TOKEN_RE.test(restored))
+      return seeOther(`${action.page}?error=1`);
+    const started = await startCheckout(site, req, restored, () => seeOther("/"));
+    started.headers.append("set-cookie", cartCookie(restored));
+    return started;
+  }
+
+  async function newsletterClick(site: SameOriginSite, req: Request, url: URL): Promise<Response> {
+    const noStore = { "cache-control": "no-store" };
+    if (req.method !== "GET") return text(405, "Method not allowed", { allow: "GET" });
+    const q = url.searchParams;
+    if (q.size !== 3 || !["t", "u", "s"].every((k) => q.getAll(k).length === 1))
+      return text(404, "Not found", noStore);
+    const res = await upstream(
+      new Request(`${opts.apiOrigin}/storefront/v1/newsletter/click${url.search}`, {
+        headers: apiHeaders(site, { accept: "application/json" }),
+      }),
+    );
+    const target = res.ok
+      ? ((await res.json().catch(() => null)) as { url?: unknown } | null)?.url
+      : null;
+    if (!res.ok) await res.body?.cancel().catch(() => undefined);
+    if (typeof target !== "string" || !/^https?:\/\//.test(target))
+      return text(404, "Not found", noStore);
+    return new Response(null, { status: 303, headers: { location: target, ...noStore } });
+  }
+
+  async function oneClickUnsubscribe(site: SameOriginSite, req: Request, token: string) {
+    const noStore = { "cache-control": "no-store" };
+    if (req.method !== "POST")
+      return text(405, "Method not allowed", { allow: "POST", ...noStore });
+    if (!TOKEN_RE.test(token)) return text(404, "Not found", noStore);
+    const res = await upstream(
+      new Request(`${opts.apiOrigin}/storefront/v1/unsubscribe`, {
+        method: "POST",
+        headers: apiHeaders(site, { "content-type": "application/json" }),
+        body: JSON.stringify({ token }),
+      }),
+    );
+    await res.body?.cancel().catch(() => undefined);
+    return text(res.ok ? 200 : 404, res.ok ? "Unsubscribed" : "Not found", noStore);
+  }
+
   async function orderPage(site: SameOriginSite, req: Request, url: URL): Promise<Response> {
     if (req.method !== "GET" && req.method !== "HEAD")
       return text(405, "Method not allowed", { allow: "GET, HEAD" });
@@ -2249,6 +2338,8 @@ ${
           port,
           clientIp,
         );
+      if (p.startsWith(ONE_CLICK_PREFIX))
+        return oneClickUnsubscribe(site, req, p.slice(ONE_CLICK_PREFIX.length));
       if (p.startsWith("/_checkout/")) return checkoutAsset(site, req, p);
       if (p === "/_p/tokens.css") return tokensCss(site);
       if (p === "/_p/checkout" || (p.startsWith("/_p/checkout/") && p !== "/_p/checkout/start"))

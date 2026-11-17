@@ -196,27 +196,36 @@ pub(crate) async fn snapshot(tx: &mut TenantTx, source: &CartRef) -> Result<Cart
     )
     .fetch_one(&mut **tx)
     .await?;
+    copy_lines_and_coupons(tx, source.id, id).await?;
+    Ok(CartRef {
+        id,
+        market_id: source.market_id,
+    })
+}
+
+pub(crate) async fn copy_lines_and_coupons(
+    tx: &mut TenantTx,
+    from: Uuid,
+    to: Uuid,
+) -> Result<(), Error> {
     sqlx::query!(
         "INSERT INTO cart_lines (tenant_id, cart_id, variant_id, quantity, created_at)
          SELECT tenant_id, $2, variant_id, quantity, created_at FROM cart_lines
          WHERE cart_id = $1 ORDER BY created_at, id",
-        source.id,
-        id
+        from,
+        to
     )
     .execute(&mut **tx)
     .await?;
     sqlx::query!(
         "INSERT INTO cart_coupons (tenant_id, cart_id, coupon_id)
          SELECT tenant_id, $2, coupon_id FROM cart_coupons WHERE cart_id = $1",
-        source.id,
-        id
+        from,
+        to
     )
     .execute(&mut **tx)
     .await?;
-    Ok(CartRef {
-        id,
-        market_id: source.market_id,
-    })
+    Ok(())
 }
 
 pub(crate) async fn empty(tx: &mut TenantTx, cart_id: Uuid) -> Result<(), Error> {
