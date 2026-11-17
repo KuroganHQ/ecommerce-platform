@@ -2108,7 +2108,6 @@ ${
     return new Response(req.method === "HEAD" ? null : r.body, { status: r.status, headers });
   }
 
-  /** A2 account half: a code for the checkout at `origin`, which the API checks (SHOP-95). */
   async function accountCode(
     site: Site,
     req: Request,

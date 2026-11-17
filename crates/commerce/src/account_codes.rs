@@ -1,8 +1,3 @@
-//! A2 account half (same-origin-checkout.md): the account origin tells a same-origin checkout
-//! who is signed in through a single-use, 60-second code, bound to its purpose, the checkout's
-//! opaque `state`, the exact callback origin, the tenant and the account. Codes and states are
-//! stored only as SHA-256 hashes.
-
 use platform::Error;
 use platform::db::TenantTx;
 use serde::{Deserialize, Serialize};

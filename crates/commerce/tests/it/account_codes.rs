@@ -1,5 +1,3 @@
-//! A2 account half: codes the account origin issues and a same-origin checkout consumes.
-
 use std::time::Duration;
 
 use commerce::account_codes::{self, AccountEvidence, Purpose};

@@ -1,5 +1,3 @@
--- A2 account half (same-origin-checkout.md): single-use, 60-second codes the account origin
--- issues to a same-origin checkout, bound to purpose, state, callback origin, tenant and account.
 CREATE TABLE account_codes (
     code_hash       bytea NOT NULL CHECK (length(code_hash) = 32),
     tenant_id       uuid NOT NULL REFERENCES platform.tenants (id),
