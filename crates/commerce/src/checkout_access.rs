@@ -20,10 +20,10 @@ use platform::Error;
 use platform::db::TenantTx;
 use uuid::Uuid;
 
-use crate::{audit, capability};
 use crate::cart::{self, CartRef};
 use crate::storefront::Context;
 use crate::tenancy::{self, CheckoutMode};
+use crate::{audit, capability};
 
 pub const HANDOFF_SECS: i64 = 60;
 pub const SAME_ORIGIN_IDLE_HOURS: i64 = 24;

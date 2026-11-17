@@ -7,7 +7,7 @@ use super::*;
 const UNKNOWN_STATE: &str = "unknownstate_0123456789abcdef0123456789abcdef0123456789abcdef0";
 
 impl Ctx {
-    async fn linked(&self, method: Uuid, session: &str) -> (String, Value) {
+    pub(super) async fn linked(&self, method: Uuid, session: &str) -> (String, Value) {
         let cart = checkout_cart(self).await;
         let s = self.identify(&cart).await.state;
         let code = self.code(session, "identify", &s).await;
@@ -18,7 +18,13 @@ impl Ctx {
         (k, view)
     }
 
-    async fn placement_state(&self, cart: &str, key: &str, view: &Value, notes: &str) -> String {
+    pub(super) async fn placement_state(
+        &self,
+        cart: &str,
+        key: &str,
+        view: &Value,
+        notes: &str,
+    ) -> String {
         let (status, text, res) = self.place(cart, key, &place_body(view, notes)).await;
         assert_eq!(status, StatusCode::ACCEPTED, "{text}");
         assert_eq!(replacement(&res), None, "no capability before the order");
@@ -26,7 +32,7 @@ impl Ctx {
         body["state"].as_str().unwrap().to_owned()
     }
 
-    async fn placement_code(&self, session: Option<&str>, state: &str) -> String {
+    pub(super) async fn placement_code(&self, session: Option<&str>, state: &str) -> String {
         let mut call = self.edge.call(Call::post(
             "/storefront/v1/customer/account-codes",
             json!({ "purpose": "placement", "state": state, "origin": self.edge.origin }),

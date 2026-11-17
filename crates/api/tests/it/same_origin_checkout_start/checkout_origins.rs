@@ -216,7 +216,10 @@ async fn attestation_records_actor_time_and_version(db: PgPool) {
         .unwrap();
     assert!(at >= started - chrono::Duration::seconds(5) && at <= Utc::now());
     assert_eq!(
-        (attested["mode"].clone(), attested["mode_generation"].clone()),
+        (
+            attested["mode"].clone(),
+            attested["mode_generation"].clone()
+        ),
         (json!("isolated"), json!(1)),
         "recording the history changes no mode"
     );
@@ -290,7 +293,10 @@ async fn unknown_or_used_origins_cannot_enable(db: PgPool) {
             json!({ "origin": origin, "attestation_version": 2 }),
             "unsupported_attestation_version",
         ),
-        (json!({ "origin": "https://Shop.localhost" }), "invalid_origin"),
+        (
+            json!({ "origin": "https://Shop.localhost" }),
+            "invalid_origin",
+        ),
     ] {
         let (status, body) = c
             .admin(
@@ -316,7 +322,11 @@ async fn unknown_or_used_origins_cannot_enable(db: PgPool) {
         ),
     ] {
         let (status, body) = c.admin(call, OWNER).await;
-        assert_eq!(status, StatusCode::NOT_FOUND, "another tenant's origin: {body}");
+        assert_eq!(
+            status,
+            StatusCode::NOT_FOUND,
+            "another tenant's origin: {body}"
+        );
     }
     assert_eq!(c.origin(origin).await["mode"], "isolated");
 }
@@ -459,7 +469,11 @@ async fn switch_revokes_the_shop_audits_and_purges(db: PgPool) {
         vec![json!({ "tenant_id": c.shop.tenant })],
         "the edge drops its resolver and page caches of the tenant"
     );
-    assert_eq!(c.checkout_via(&c.edge, &here).await, StatusCode::NOT_FOUND, "revoked");
+    assert_eq!(
+        c.checkout_via(&c.edge, &here).await,
+        StatusCode::NOT_FOUND,
+        "revoked"
+    );
     assert_eq!(
         c.checkout_via(&alias, &there).await,
         StatusCode::NOT_FOUND,
@@ -475,7 +489,10 @@ async fn switch_revokes_the_shop_audits_and_purges(db: PgPool) {
     assert_eq!(audit[0]["actor"], OWNER);
     assert_eq!(audit[0]["entity_id"], origin);
     assert_eq!(
-        (audit[0]["diff"]["from"].clone(), audit[0]["diff"]["to"].clone()),
+        (
+            audit[0]["diff"]["from"].clone(),
+            audit[0]["diff"]["to"].clone()
+        ),
         (json!("isolated"), json!("same_origin"))
     );
 
@@ -483,8 +500,15 @@ async fn switch_revokes_the_shop_audits_and_purges(db: PgPool) {
     let k = c.started(&shop_token, None).await;
     let (status, again) = c.set_mode(&origin, "same_origin").await;
     assert_eq!(status, StatusCode::OK, "{again}");
-    assert_eq!(again["mode_generation"], 2, "switching to the current mode is a no-op");
-    assert_eq!(c.checkout(&k).await.0, StatusCode::OK, "and revokes nothing");
+    assert_eq!(
+        again["mode_generation"], 2,
+        "switching to the current mode is a no-op"
+    );
+    assert_eq!(
+        c.checkout(&k).await.0,
+        StatusCode::OK,
+        "and revokes nothing"
+    );
     assert_eq!(purged.lock().await.len(), 1, "nor purges");
     assert_eq!(c.audit("checkout_origin.mode_switched").await.len(), 1);
 
@@ -500,10 +524,18 @@ async fn switch_revokes_the_shop_audits_and_purges(db: PgPool) {
             OWNER,
         )
         .await;
-    assert_eq!(status, StatusCode::OK, "rollback needs no readiness: {back}");
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "rollback needs no readiness: {back}"
+    );
     assert_eq!(
         (back["mode"].clone(), back["mode_generation"].clone()),
         (json!("isolated"), json!(3))
     );
-    assert_eq!(c.checkout(&k).await.0, StatusCode::NOT_FOUND, "revoked again");
+    assert_eq!(
+        c.checkout(&k).await.0,
+        StatusCode::NOT_FOUND,
+        "revoked again"
+    );
 }

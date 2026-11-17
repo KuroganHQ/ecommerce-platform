@@ -805,7 +805,12 @@ async fn switch_does_not_wait_for_fenceless_cart_writers(db: PgPool) {
         .unwrap();
     let switched = tokio::time::timeout(
         Duration::from_secs(10),
-        switch_mode(&runtime, shop.tenant, &shop.origin, CheckoutMode::SameOrigin),
+        switch_mode(
+            &runtime,
+            shop.tenant,
+            &shop.origin,
+            CheckoutMode::SameOrigin,
+        ),
     )
     .await
     .expect("the switch waited for a cart row lock")

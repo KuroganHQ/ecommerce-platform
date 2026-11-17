@@ -48,7 +48,7 @@ struct Ctx {
 
 async fn setup(db: PgPool, mode: CheckoutMode) -> Ctx {
     let jwks = jwks_server(json!([jwk("a", X_A)])).await;
-    let runtime = testkit::runtime_pool(&db, 4).await;
+    let runtime = testkit::runtime_pool(&db, 10).await;
     let shop = testkit::storefront::shop(&runtime, "shop").await;
     testkit::staff(&runtime, shop.tenant, checkout_origins::OWNER, "owner").await;
     let c = Ctx {
@@ -112,7 +112,11 @@ impl Ctx {
         let (status, after) = self.set_mode(origin, mode.as_str()).await;
         assert_eq!(status, StatusCode::OK, "{after}");
         assert_eq!(after["mode"], mode.as_str());
-        assert_eq!(after["mode_generation"], json!(before.as_i64().unwrap() + 1), "switched to {mode:?}");
+        assert_eq!(
+            after["mode_generation"],
+            json!(before.as_i64().unwrap() + 1),
+            "switched to {mode:?}"
+        );
     }
 
     async fn call(&self, call: Call<'_>, cart: &str) -> (StatusCode, Value) {

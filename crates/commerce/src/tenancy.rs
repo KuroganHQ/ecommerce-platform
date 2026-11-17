@@ -578,8 +578,9 @@ pub async fn record_origin_history(
         (true, Some(_)) => {
             return Err(Error::Conflict {
                 code: "platform_hostname",
-                detail: "a platform hostname's history is the platform's own; it takes no attestation"
-                    .into(),
+                detail:
+                    "a platform hostname's history is the platform's own; it takes no attestation"
+                        .into(),
             });
         }
         (false, Some(ATTESTATION_VERSION)) => (
