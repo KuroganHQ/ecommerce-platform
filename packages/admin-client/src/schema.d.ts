@@ -8099,6 +8099,8 @@ export interface components {
         OptionValueView: {
             code: string;
             name: string;
+            /** @description Colour swatch as `#rrggbb`. */
+            swatch?: string | null;
         };
         OptionView: {
             code: string;

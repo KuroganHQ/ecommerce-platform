@@ -210,9 +210,10 @@ async fn best_selling_and_top_rated_fallback_order_per_market(db: PgPool) {
 }
 
 #[sqlx::test(migrations = "../../migrations")]
-async fn cards_carry_five_photos_and_sold_colour_swatches(db: PgPool) {
+async fn cards_and_product_page_carry_photos_and_colour_swatches(db: PgPool) {
     use commerce::catalog::products::{OptionValue, ProductMedia, ProductOption};
     use commerce::storefront::cards::{self, Swatch};
+    use commerce::storefront::product::{self, OptionValueView};
 
     let runtime = testkit::runtime_pool(&db, 2).await;
     let shop = testkit::storefront::shop(&runtime, "swatches").await;
@@ -322,6 +323,32 @@ async fn cards_carry_five_photos_and_sold_colour_swatches(db: PgPool) {
             },
         ],
         "colour option order, without the unpriced value"
+    );
+
+    let page = product::product_page(&mut tx, &ctx, "swatch-cs")
+        .await
+        .unwrap()
+        .unwrap();
+    let view = |code: &str, name: &str, swatch: Option<&str>| OptionValueView {
+        code: code.into(),
+        name: name.into(),
+        swatch: swatch.map(Into::into),
+    };
+    assert_eq!(
+        page.product
+            .options
+            .iter()
+            .map(|o| o.values.clone())
+            .collect::<Vec<_>>(),
+        [
+            vec![view("s", "S", None), view("m", "M", None)],
+            vec![
+                view("cervena", "Červená", Some("#c0392b")),
+                view("zelena", "Zelená", Some("#2f4f3c")),
+                view("modra", "Modrá", Some("#2F5D8A")),
+            ],
+        ],
+        "every option value, with its swatch where it has one"
     );
 }
 
