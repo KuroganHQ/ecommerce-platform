@@ -459,10 +459,6 @@ export function linkToken(): { token: string; hash: string } {
   return { token, hash: createHash("sha256").update(token).digest("hex") };
 }
 
-/**
- * Signs in on the account sign-in page `page` shows, through the emailed link. The worker mails
- * the link on the configured (HTTP) account origin; it is followed on the page's own origin.
- */
 export async function signInByEmail(page: Page, email: string): Promise<void> {
   const since = new Date(Date.now() - 1000);
   const form = page.locator("form").first();

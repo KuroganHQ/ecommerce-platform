@@ -40,10 +40,8 @@ const NAVIGATE = {
 const marker = () => `pii${randomBytes(6).toString("hex")}`;
 const emailOf = (who: string, browserName: string) =>
   `${who}-${browserName}-${run}-${randomBytes(3).toString("hex")}@example.test`;
-const startsWith = (prefix: string) => (url: URL) => url.href.startsWith(prefix);
 const stateHash = (state: string) => `sha256(convert_to('${state}', 'UTF8'))`;
 
-/** Orders and saved addresses of the account `email`. */
 const footprint = (email: string) =>
   sql(`SELECT (SELECT count(*) FROM orders o JOIN customers c ON c.id = o.customer_id
                 WHERE lower(c.email) = lower('${email}'))
@@ -64,7 +62,6 @@ async function signedIn(browser: Browser, email: string): Promise<Shopper> {
   return { context, page, email };
 }
 
-/** From the address step: identify, signing in on the account origin first when `signIn` is given. */
 async function identify(page: Page, signIn?: string) {
   await page.getByRole("button", { name: IDENTIFY }).click();
   if (signIn) {
@@ -74,7 +71,6 @@ async function identify(page: Page, signIn?: string) {
   await page.waitForURL(`${FRESH_HTTPS}/checkout`);
 }
 
-/** An identify started while signed out stops on the account sign-in page, its state unconsumed. */
 async function pendingIdentify(page: Page): Promise<string> {
   await page.getByRole("button", { name: IDENTIFY }).click();
   await page.waitForURL((u) => u.origin === ACCOUNT_HTTPS && u.pathname === "/account");
@@ -299,7 +295,7 @@ test("a capability rotated after the place POST aborts the placement without an 
   await chooseCashOnDelivery(page, /PPL – kurýr/, /Testovací platba/);
 
   const placement = new Promise<string>((resolve) => {
-    void page.route(startsWith(`${FRESH_HTTPS}/checkout/place-order`), async (route) => {
+    void page.route(`${FRESH_HTTPS}/checkout/place-order`, async (route) => {
       const res = await route.fetch({
         maxRedirects: 0,
         headers: {
