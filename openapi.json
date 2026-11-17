@@ -17233,6 +17233,18 @@
             }
           },
           {
+            "name": "X-Link-Grant",
+            "in": "header",
+            "description": "Same-origin shop: the link grant from the `__Host-Http-cap` cookie (reads only).",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
             "name": "attempt",
             "in": "path",
             "required": true,
@@ -17327,6 +17339,18 @@
             "name": "X-Customer-Session",
             "in": "header",
             "description": "The session of the order's customer (`__Host-sid`).",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "X-Link-Grant",
+            "in": "header",
+            "description": "Same-origin shop: the link grant from the `__Host-Http-cap` cookie (reads only).",
             "required": false,
             "schema": {
               "type": [
@@ -20333,87 +20357,6 @@
         }
       }
     },
-    "/storefront/v1/link-grants/orders/{id}": {
-      "get": {
-        "tags": [
-          "storefront"
-        ],
-        "summary": "The order a grant may read. Paying stays with the checkout capability or the customer.",
-        "operationId": "order",
-        "parameters": [
-          {
-            "name": "X-Storefront-Token",
-            "in": "header",
-            "description": "The tenant's public storefront token.",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "X-Market",
-            "in": "header",
-            "description": "Market id resolved from the shop host by the edge.",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          },
-          {
-            "name": "X-Locale",
-            "in": "header",
-            "description": "Locale hint (one of the market's locales).",
-            "required": false,
-            "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
-            }
-          },
-          {
-            "name": "X-Link-Grant",
-            "in": "header",
-            "description": "The link grant from the `__Host-Http-cap` cookie.",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/OrderView"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "no grant for this order",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/storefront/v1/link-grants/withdrawal-request": {
       "post": {
         "tags": [
@@ -21090,9 +21033,21 @@
             }
           },
           {
+            "name": "X-Link-Grant",
+            "in": "header",
+            "description": "Same-origin shop: the link grant from the `__Host-Http-cap` cookie (reads only).",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
             "name": "token",
             "in": "path",
-            "description": "Order capability token",
+            "description": "Order capability token, or the order id on a same-origin shop",
             "required": true,
             "schema": {
               "type": "string"
@@ -21160,9 +21115,45 @@
             }
           },
           {
+            "name": "X-Cart-Token",
+            "in": "header",
+            "description": "The checkout cart capability the order was placed with (`__Host-cart`).",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "X-Customer-Session",
+            "in": "header",
+            "description": "The session of the order's customer (`__Host-sid`).",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "X-Link-Grant",
+            "in": "header",
+            "description": "Same-origin shop: the link grant from the `__Host-Http-cap` cookie (reads only).",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
             "name": "token",
             "in": "path",
-            "description": "Order capability token",
+            "description": "Order capability token, or the order id on a same-origin shop",
             "required": true,
             "schema": {
               "type": "string"
@@ -21255,9 +21246,21 @@
             }
           },
           {
+            "name": "X-Link-Grant",
+            "in": "header",
+            "description": "Same-origin shop: the link grant from the `__Host-Http-cap` cookie (reads only).",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
             "name": "token",
             "in": "path",
-            "description": "Order capability token",
+            "description": "Order capability token, or the order id on a same-origin shop",
             "required": true,
             "schema": {
               "type": "string"
@@ -21350,9 +21353,21 @@
             }
           },
           {
+            "name": "X-Link-Grant",
+            "in": "header",
+            "description": "Same-origin shop: the link grant from the `__Host-Http-cap` cookie (reads only).",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
             "name": "token",
             "in": "path",
-            "description": "Order capability token",
+            "description": "Order capability token, or the order id on a same-origin shop",
             "required": true,
             "schema": {
               "type": "string"
@@ -21465,9 +21480,21 @@
             }
           },
           {
+            "name": "X-Link-Grant",
+            "in": "header",
+            "description": "Same-origin shop: the link grant from the `__Host-Http-cap` cookie (reads only).",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
             "name": "token",
             "in": "path",
-            "description": "Order capability token",
+            "description": "Order capability token, or the order id on a same-origin shop",
             "required": true,
             "schema": {
               "type": "string"
@@ -21589,9 +21616,21 @@
             }
           },
           {
+            "name": "X-Link-Grant",
+            "in": "header",
+            "description": "Same-origin shop: the link grant from the `__Host-Http-cap` cookie (reads only).",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
             "name": "token",
             "in": "path",
-            "description": "Order capability token",
+            "description": "Order capability token, or the order id on a same-origin shop",
             "required": true,
             "schema": {
               "type": "string"
@@ -35003,7 +35042,7 @@
         "properties": {
           "confirmation_url": {
             "type": "string",
-            "description": "The order page on the checkout origin (`/o/<token>`, a read-only capability, A4)."
+            "description": "The order page: on the checkout origin `/o/<token>` (a read-only capability, A4), on a\nsame-origin shop `/o/<order id>`."
           },
           "number": {
             "type": "string"

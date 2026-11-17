@@ -3,7 +3,8 @@
 //! works from the confirmation email in any browser. Paying (a new attempt, provider init)
 //! additionally needs the checkout cart capability the order was placed with (the same
 //! browser) or the session of the order's customer. The edge maps `/_p/orders/<token>/*` here
-//! and forwards both.
+//! and forwards both. On a same-origin shop the page is `/o/<order id>` and the path carries
+//! no credential: a link grant reads, the placing checkout capability pays (`order_access`).
 
 use axum::Json;
 use axum::body::Bytes;
@@ -11,10 +12,11 @@ use axum::extract::rejection::PathRejection;
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
-use commerce::checkout;
 use commerce::customers;
+use commerce::order_access::{self, Access, Credentials};
 use commerce::orders::{self, OrderView, PaymentView};
 use commerce::payments::{self, Outcome, stripe};
+use commerce::storefront::Context;
 use platform::Error;
 use platform::db::TenantTx;
 use serde::Deserialize;
@@ -25,6 +27,7 @@ use uuid::Uuid;
 
 use super::checkout::{PaymentStart, start_payment};
 use super::customer::{SESSION_HEADER, header_str, no_store};
+use super::link_grants::GRANT_HEADER;
 use super::{CART_HEADER, Shopper, StorefrontHeaders, with_ctx};
 use crate::AppState;
 use crate::admin::parse_json;
@@ -49,15 +52,29 @@ pub(crate) struct PayerHeaders {
     /// The session of the order's customer (`__Host-sid`).
     #[param(rename = "X-Customer-Session")]
     x_customer_session: Option<String>,
+    /// Same-origin shop: the link grant from the `__Host-Http-cap` cookie (reads only).
+    #[param(rename = "X-Link-Grant")]
+    x_link_grant: Option<String>,
 }
 
-fn token(path: Result<Path<String>, PathRejection>) -> Result<String, Error> {
-    path.map(|Path(t)| t).map_err(|_| Error::NotFound)
+/// An order path segment: the order id on a same-origin shop, else the order capability token.
+pub(super) enum OrderRef {
+    Id(Uuid),
+    Token(String),
+}
+
+pub(super) fn order_ref(path: Result<Path<String>, PathRejection>) -> Result<OrderRef, Error> {
+    let Path(segment) = path.map_err(|_| Error::NotFound)?;
+    Ok(match Uuid::try_parse(&segment) {
+        Ok(id) if segment.len() == 36 => OrderRef::Id(id),
+        _ => OrderRef::Token(segment),
+    })
 }
 
 /// Whether the requester may pay `order` (see the module docs).
 pub(super) async fn may_pay(
     tx: &mut TenantTx,
+    ctx: &Context,
     headers: &HeaderMap,
     order: Uuid,
 ) -> Result<bool, Error> {
@@ -65,15 +82,67 @@ pub(super) async fn may_pay(
         Some(t) => customers::authenticate(tx, t).await?.map(|s| s.customer_id),
         None => None,
     };
-    orders::may_pay(tx, order, header_str(headers, CART_HEADER), customer).await
+    order_access::may_pay(tx, ctx, order, header_str(headers, CART_HEADER), customer).await
 }
 
-/// The order behind the token, its payment view narrowed to what this requester may do.
-async fn read(tx: &mut TenantTx, headers: &HeaderMap, t: &str) -> Result<OrderView, Error> {
-    let mut view = checkout::order_by_token(tx, t).await?;
-    let allowed = may_pay(tx, headers, view.id).await?;
-    view.payment.can_pay = allowed;
-    view.payment.can_retry &= allowed;
+pub(super) struct Authorized {
+    pub(super) order: Uuid,
+    may_pay: bool,
+    page: String,
+}
+
+/// The order `r` names and what this requester may do with it, `404` when nothing.
+pub(super) async fn authorize(
+    tx: &mut TenantTx,
+    ctx: &Context,
+    headers: &HeaderMap,
+    r: &OrderRef,
+) -> Result<Authorized, Error> {
+    match r {
+        OrderRef::Token(t) => {
+            let order = orders::by_token(tx, t).await?;
+            Ok(Authorized {
+                order,
+                may_pay: may_pay(tx, ctx, headers, order).await?,
+                page: format!("/o/{t}"),
+            })
+        }
+        OrderRef::Id(id) => {
+            let credentials = Credentials {
+                checkout: header_str(headers, CART_HEADER),
+                grant: header_str(headers, GRANT_HEADER),
+            };
+            let access = order_access::authorize(tx, ctx, *id, credentials).await?;
+            Ok(Authorized {
+                order: *id,
+                may_pay: access == Access::Pay,
+                page: format!("/o/{id}"),
+            })
+        }
+    }
+}
+
+async fn authorize_payer(
+    tx: &mut TenantTx,
+    ctx: &Context,
+    headers: &HeaderMap,
+    r: &OrderRef,
+) -> Result<Authorized, Error> {
+    let a = authorize(tx, ctx, headers, r).await?;
+    if a.may_pay { Ok(a) } else { Err(not_allowed()) }
+}
+
+/// The order, its payment view narrowed to what this requester may do.
+async fn read(
+    tx: &mut TenantTx,
+    ctx: &Context,
+    headers: &HeaderMap,
+    r: &OrderRef,
+) -> Result<OrderView, Error> {
+    let a = authorize(tx, ctx, headers, r).await?;
+    let mut view = orders::view(tx, a.order).await?;
+    view.payment.can_pay = a.may_pay;
+    view.payment.can_retry &= a.may_pay;
     Ok(view)
 }
 
@@ -81,7 +150,7 @@ async fn read(tx: &mut TenantTx, headers: &HeaderMap, t: &str) -> Result<OrderVi
     get,
     path = "/storefront/v1/orders/{token}",
     tag = "storefront",
-    params(StorefrontHeaders, PayerHeaders, ("token" = String, Path, description = "Order capability token")),
+    params(StorefrontHeaders, PayerHeaders, ("token" = String, Path, description = "Order capability token, or the order id on a same-origin shop")),
     responses(
         (status = 200, body = OrderView),
         (status = 404, body = platform::Problem, content_type = "application/problem+json"),
@@ -93,8 +162,11 @@ async fn get_order(
     headers: HeaderMap,
     token_path: Result<Path<String>, PathRejection>,
 ) -> Result<Response, Error> {
-    let t = token(token_path)?;
-    let view = with_ctx(&s, &shopper, async |tx, _| read(tx, &headers, &t).await).await?;
+    let r = order_ref(token_path)?;
+    let view = with_ctx(&s, &shopper, async |tx, ctx| {
+        read(tx, ctx, &headers, &r).await
+    })
+    .await?;
     Ok(no_store(Json(view).into_response()))
 }
 
@@ -103,7 +175,7 @@ async fn get_order(
     get,
     path = "/storefront/v1/orders/{token}/payment",
     tag = "storefront",
-    params(StorefrontHeaders, PayerHeaders, ("token" = String, Path, description = "Order capability token")),
+    params(StorefrontHeaders, PayerHeaders, ("token" = String, Path, description = "Order capability token, or the order id on a same-origin shop")),
     responses(
         (status = 200, body = PaymentView),
         (status = 404, body = platform::Problem, content_type = "application/problem+json"),
@@ -115,9 +187,9 @@ async fn get_payment(
     headers: HeaderMap,
     token_path: Result<Path<String>, PathRejection>,
 ) -> Result<Response, Error> {
-    let t = token(token_path)?;
-    let view = with_ctx(&s, &shopper, async |tx, _| {
-        Ok(read(tx, &headers, &t).await?.payment)
+    let r = order_ref(token_path)?;
+    let view = with_ctx(&s, &shopper, async |tx, ctx| {
+        Ok(read(tx, ctx, &headers, &r).await?.payment)
     })
     .await?;
     Ok(no_store(Json(view).into_response()))
@@ -135,7 +207,7 @@ fn not_allowed() -> Error {
     post,
     path = "/storefront/v1/orders/{token}/payment-attempts",
     tag = "storefront",
-    params(StorefrontHeaders, PayerHeaders, ("token" = String, Path, description = "Order capability token")),
+    params(StorefrontHeaders, PayerHeaders, ("token" = String, Path, description = "Order capability token, or the order id on a same-origin shop")),
     responses(
         (status = 201, body = PaymentStart),
         (status = 403, description = "payment_not_allowed", body = platform::Problem, content_type = "application/problem+json"),
@@ -149,16 +221,16 @@ async fn new_attempt(
     headers: HeaderMap,
     token_path: Result<Path<String>, PathRejection>,
 ) -> Result<Response, Error> {
-    let t = token(token_path)?;
-    let attempt = with_ctx(&s, &shopper, async |tx, _| {
-        let order = orders::by_token(tx, &t).await?;
-        if !may_pay(tx, &headers, order).await? {
-            return Err(not_allowed());
-        }
-        payments::retry(tx, &s.checkout.payments, order).await
+    let r = order_ref(token_path)?;
+    let (attempt, page) = with_ctx(&s, &shopper, async |tx, ctx| {
+        let a = authorize_payer(tx, ctx, &headers, &r).await?;
+        Ok((
+            payments::retry(tx, &s.checkout.payments, a.order).await?,
+            a.page,
+        ))
     })
     .await?;
-    let start = start_payment(&s, shopper.tenant_id, attempt, &format!("/o/{t}")).await;
+    let start = start_payment(&s, shopper.tenant_id, attempt, &page).await;
     Ok(no_store((StatusCode::CREATED, Json(start)).into_response()))
 }
 
@@ -172,7 +244,7 @@ async fn new_attempt(
     params(
         StorefrontHeaders,
         PayerHeaders,
-        ("token" = String, Path, description = "Order capability token"),
+        ("token" = String, Path, description = "Order capability token, or the order id on a same-origin shop"),
         ("attempt" = Uuid, Path),
     ),
     responses(
@@ -188,16 +260,17 @@ async fn init_attempt(
     headers: HeaderMap,
     path: Result<Path<(String, Uuid)>, PathRejection>,
 ) -> Result<Response, Error> {
-    let Path((t, attempt)) = path.map_err(|_| Error::NotFound)?;
-    with_ctx(&s, &shopper, async |tx, _| {
-        let order = orders::by_token(tx, &t).await?;
-        if payments::attempt(tx, attempt).await?.order_id != order {
+    let Path((segment, attempt)) = path.map_err(|_| Error::NotFound)?;
+    let r = order_ref(Ok(Path(segment)))?;
+    let page = with_ctx(&s, &shopper, async |tx, ctx| {
+        let a = authorize(tx, ctx, &headers, &r).await?;
+        if payments::attempt(tx, attempt).await?.order_id != a.order {
             return Err(Error::NotFound);
         }
-        if !may_pay(tx, &headers, order).await? {
+        if !a.may_pay {
             return Err(not_allowed());
         }
-        Ok(())
+        Ok(a.page)
     })
     .await?;
     let action = payments::init(
@@ -205,7 +278,7 @@ async fn init_attempt(
         shopper.tenant_id,
         &s.checkout.payments,
         attempt,
-        &format!("/o/{t}"),
+        &page,
     )
     .await?;
     Ok(no_store(
@@ -235,7 +308,7 @@ pub struct SimulateInput {
     params(
         StorefrontHeaders,
         PayerHeaders,
-        ("token" = String, Path, description = "Order capability token"),
+        ("token" = String, Path, description = "Order capability token, or the order id on a same-origin shop"),
         ("attempt" = Uuid, Path),
     ),
     request_body = SimulateInput,
@@ -253,7 +326,8 @@ async fn simulate_attempt(
     path: Result<Path<(String, Uuid)>, PathRejection>,
     body: Bytes,
 ) -> Result<Response, Error> {
-    let Path((t, attempt)) = path.map_err(|_| Error::NotFound)?;
+    let Path((segment, attempt)) = path.map_err(|_| Error::NotFound)?;
+    let r = order_ref(Ok(Path(segment)))?;
     let input: SimulateInput = parse_json(&body)?;
     let stripe = s
         .checkout
@@ -262,21 +336,21 @@ async fn simulate_attempt(
         .as_ref()
         .filter(|s| s.simulator())
         .ok_or(Error::NotFound)?;
-    with_ctx(&s, &shopper, async |tx, _| {
-        let order = orders::by_token(tx, &t).await?;
+    with_ctx(&s, &shopper, async |tx, ctx| {
+        let order = authorize(tx, ctx, &headers, &r).await?;
         let a = payments::attempt(tx, attempt).await?;
-        if a.order_id != order || a.method != payments::MethodKind::Stripe {
+        if a.order_id != order.order || a.method != payments::MethodKind::Stripe {
             return Err(Error::NotFound);
         }
-        if !may_pay(tx, &headers, order).await? {
+        if !order.may_pay {
             return Err(not_allowed());
         }
         Ok(())
     })
     .await?;
     stripe::simulate_payment(&s.db, stripe, shopper.tenant_id, attempt, input.outcome).await?;
-    let view = with_ctx(&s, &shopper, async |tx, _| {
-        Ok(read(tx, &headers, &t).await?.payment)
+    let view = with_ctx(&s, &shopper, async |tx, ctx| {
+        Ok(read(tx, ctx, &headers, &r).await?.payment)
     })
     .await?;
     Ok(no_store((StatusCode::ACCEPTED, Json(view)).into_response()))

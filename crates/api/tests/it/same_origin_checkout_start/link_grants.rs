@@ -32,7 +32,7 @@ impl Ctx {
     }
 
     async fn order_by_grant(&self, id: Uuid, grant: Option<&str>) -> (StatusCode, String) {
-        let uri = format!("/storefront/v1/link-grants/orders/{id}");
+        let uri = format!("/storefront/v1/orders/{id}");
         let mut call = self.edge.call(Call::get(&uri));
         if let Some(g) = grant {
             call = call.header(GRANT, g);
@@ -235,4 +235,98 @@ async fn anonymous_withdrawal_grant_reads_nothing_and_its_request_rolls_back(db:
         "the completed request revoked the grant"
     );
     assert_eq!(c.withdrawal_links().await, 1);
+}
+
+impl Ctx {
+    async fn on_order(
+        &self,
+        call: Call<'_>,
+        cart: Option<&str>,
+        grant: Option<&str>,
+    ) -> (StatusCode, Value) {
+        let mut call = self.edge.call(call);
+        if let Some(k) = cart {
+            call = call.header("x-cart-token", k.to_owned());
+        }
+        if let Some(g) = grant {
+            call = call.header(GRANT, g.to_owned());
+        }
+        let (status, body, _) = call.send(&self.s).await;
+        (status, body)
+    }
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn clean_order_page_reads_by_grant_and_only_the_placing_checkout_pays(db: PgPool) {
+    let c = setup(db, CheckoutMode::SameOrigin).await;
+    let p = c.placed(c.placeable().await, "").await;
+    let id: Uuid = p.order["order_id"].as_str().unwrap().parse().unwrap();
+    let attempt = p.order["payment"]["attempt_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert_eq!(p.order["confirmation_url"], format!("/o/{id}"));
+    assert_eq!(
+        p.order["payment"]["action"],
+        json!({"type": "redirect", "url": format!("/_p/fake-pay/{attempt}?return=/o/{id}")}),
+        "the provider returns to the clean order page"
+    );
+    let (_, _, grant) = c
+        .exchange(
+            json!({"kind": "order", "token": c.email_link(id).await}),
+            None,
+        )
+        .await;
+    let grant = grant.unwrap();
+    let k = Some(p.current.as_str());
+    let g = Some(grant.as_str());
+    let order = format!("/storefront/v1/orders/{id}");
+    let payment = format!("{order}/payment");
+    let documents = format!("{order}/documents");
+
+    let (status, view) = c.on_order(Call::get(&order), None, g).await;
+    assert_eq!(status, StatusCode::OK, "{view}");
+    assert_eq!(view["payment"]["can_pay"], false, "the grant only reads");
+    let (status, view) = c.on_order(Call::get(&order), k, None).await;
+    assert_eq!(status, StatusCode::OK, "{view}");
+    assert_eq!(
+        view["payment"]["can_pay"], true,
+        "the placing checkout pays"
+    );
+    for path in [&payment, &documents] {
+        let (status, body) = c.on_order(Call::get(path), None, g).await;
+        assert_eq!(status, StatusCode::OK, "{path}: {body}");
+    }
+    for path in [&order, &payment, &documents] {
+        let (status, _) = c.on_order(Call::get(path), None, None).await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{path} without authority");
+    }
+
+    let init = format!("{order}/payment-attempts/{attempt}/init");
+    let fake_pay = format!("/storefront/v1/checkout/fake-pay/{attempt}");
+    let failed = json!({"outcome": "failed"});
+    for (call, what) in [
+        (Call::post(&init, json!({})), "init"),
+        (Call::post(&fake_pay, failed.clone()), "fake pay"),
+        (Call::get(&fake_pay), "fake pay page"),
+    ] {
+        let (status, body) = c.on_order(call, None, g).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{what} by grant: {body}");
+        assert_eq!(body["code"], "payment_not_allowed", "{what}");
+    }
+    let (status, page) = c.on_order(Call::post(&fake_pay, failed), k, None).await;
+    assert_eq!(status, StatusCode::OK, "{page}");
+    assert_eq!(page["status"], "failed");
+
+    let retry = format!("{order}/payment-attempts");
+    let (status, body) = c.on_order(Call::post(&retry, json!({})), None, g).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "bearer-only retry: {body}");
+    assert_eq!(body["code"], "payment_not_allowed");
+    let (status, started) = c.on_order(Call::post(&retry, json!({})), k, None).await;
+    assert_eq!(status, StatusCode::CREATED, "{started}");
+    let second = started["attempt_id"].as_str().unwrap();
+    assert_eq!(
+        started["action"]["url"],
+        format!("/_p/fake-pay/{second}?return=/o/{id}")
+    );
 }

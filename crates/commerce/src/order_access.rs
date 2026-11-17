@@ -52,13 +52,32 @@ pub async fn may_pay(
     checkout: Option<&str>,
     customer: Option<Uuid>,
 ) -> Result<bool, Error> {
-    if ctx.origin.is_some() && enter(tx, ctx).await?.mode == CheckoutMode::SameOrigin {
+    if same_origin(tx, ctx).await? {
         return match checkout {
             Some(checkout) => pays(tx, ctx, order, checkout).await,
             None => Ok(false),
         };
     }
     orders::may_pay(tx, order, checkout, customer).await
+}
+
+/// The order page a payment returns to: the clean `/o/<id>` on a same-origin shop, else the
+/// email link.
+pub async fn page(
+    tx: &mut TenantTx,
+    ctx: &Context,
+    order: Uuid,
+    token: &str,
+) -> Result<String, Error> {
+    Ok(if same_origin(tx, ctx).await? {
+        format!("/o/{order}")
+    } else {
+        format!("/o/{token}")
+    })
+}
+
+async fn same_origin(tx: &mut TenantTx, ctx: &Context) -> Result<bool, Error> {
+    Ok(ctx.origin.is_some() && enter(tx, ctx).await?.mode == CheckoutMode::SameOrigin)
 }
 
 async fn pays(

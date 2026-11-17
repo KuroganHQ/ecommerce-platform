@@ -427,7 +427,8 @@ pub struct PaymentStart {
 pub struct PlacedOrder {
     pub order_id: Uuid,
     pub number: String,
-    /// The order page on the checkout origin (`/o/<token>`, a read-only capability, A4).
+    /// The order page: on the checkout origin `/o/<token>` (a read-only capability, A4), on a
+    /// same-origin shop `/o/<order id>`.
     pub confirmation_url: String,
     pub payment: PaymentStart,
 }
@@ -491,7 +492,7 @@ async fn place_order(
     let token = cart_token(&headers)?;
     let session = header_str(&headers, SESSION_HEADER);
     let hash = idempotency::request_hash(&body);
-    let placed = with_ctx(&s, &shopper, async |tx, ctx| {
+    let (placed, page) = with_ctx(&s, &shopper, async |tx, ctx| {
         let customer_id = match session {
             Some(t) => customers::authenticate(tx, t).await?.map(|s| s.customer_id),
             None => None,
@@ -517,13 +518,14 @@ async fn place_order(
             let ua = header_str(&headers, CLIENT_UA_HEADER);
             commerce::adtracking::capture_purchase(tx, placed.order_id, subject, ua).await?;
         }
-        Ok(placed)
+        let page = commerce::order_access::page(tx, ctx, placed.order_id, &placed.token).await?;
+        Ok((placed, page))
     })
     .await?;
     if let Some(subject) = header_str(&headers, CONSENT_SUBJECT_HEADER) {
         link_purchase(&s, shopper.tenant_id, placed.order_id, subject).await;
     }
-    let confirmation_url = format!("/o/{}", placed.token);
+    let confirmation_url = page;
     let payment = start_payment(&s, shopper.tenant_id, placed.attempt_id, &confirmation_url).await;
     let mut res = (
         StatusCode::CREATED,
@@ -614,7 +616,7 @@ async fn fake_pay_page(
             return Err(Error::NotFound);
         }
         // Like any payment: the order token alone is read-only (A4).
-        if !super::orders::may_pay(tx, &headers, a.order_id).await? {
+        if !super::orders::may_pay(tx, ctx, &headers, a.order_id).await? {
             return Err(Error::Forbidden {
                 code: "payment_not_allowed",
             });
@@ -657,13 +659,13 @@ async fn fake_pay(
     let Some(gateway) = s.checkout.payments.fake.as_ref() else {
         return Err(Error::NotFound);
     };
-    let event = with_ctx(&s, &shopper, async |tx, _| {
+    let event = with_ctx(&s, &shopper, async |tx, ctx| {
         let a = payments::attempt(tx, id).await?;
         if a.method != payments::MethodKind::Fake {
             return Err(Error::NotFound);
         }
         // Like any payment: the order token alone is read-only (A4).
-        if !super::orders::may_pay(tx, &headers, a.order_id).await? {
+        if !super::orders::may_pay(tx, ctx, &headers, a.order_id).await? {
             return Err(Error::Forbidden {
                 code: "payment_not_allowed",
             });

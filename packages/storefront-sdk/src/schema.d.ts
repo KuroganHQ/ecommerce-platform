@@ -768,23 +768,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/storefront/v1/link-grants/orders/{id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** The order a grant may read. Paying stays with the checkout capability or the customer. */
-        get: operations["order"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/storefront/v1/link-grants/withdrawal-request": {
         parameters: {
             query?: never;
@@ -2259,7 +2242,10 @@ export interface components {
             version: number;
         };
         PlacedOrder: {
-            /** @description The order page on the checkout origin (`/o/<token>`, a read-only capability, A4). */
+            /**
+             * @description The order page: on the checkout origin `/o/<token>` (a read-only capability, A4), on a
+             *     same-origin shop `/o/<order id>`.
+             */
             confirmation_url: string;
             number: string;
             /** Format: uuid */
@@ -3332,6 +3318,8 @@ export interface operations {
                 "X-Cart-Token"?: string | null;
                 /** @description The session of the order's customer (`__Host-sid`). */
                 "X-Customer-Session"?: string | null;
+                /** @description Same-origin shop: the link grant from the `__Host-Http-cap` cookie (reads only). */
+                "X-Link-Grant"?: string | null;
             };
             path: {
                 attempt: string;
@@ -3381,6 +3369,8 @@ export interface operations {
                 "X-Cart-Token"?: string | null;
                 /** @description The session of the order's customer (`__Host-sid`). */
                 "X-Customer-Session"?: string | null;
+                /** @description Same-origin shop: the link grant from the `__Host-Http-cap` cookie (reads only). */
+                "X-Link-Grant"?: string | null;
             };
             path: {
                 attempt: string;
@@ -4961,45 +4951,6 @@ export interface operations {
             };
         };
     };
-    order: {
-        parameters: {
-            query?: never;
-            header: {
-                /** @description The tenant's public storefront token. */
-                "X-Storefront-Token": string;
-                /** @description Market id resolved from the shop host by the edge. */
-                "X-Market": string;
-                /** @description Locale hint (one of the market's locales). */
-                "X-Locale"?: string | null;
-                /** @description The link grant from the `__Host-Http-cap` cookie. */
-                "X-Link-Grant": string;
-            };
-            path: {
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["OrderView"];
-                };
-            };
-            /** @description no grant for this order */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["Problem"];
-                };
-            };
-        };
-    };
     request_withdrawal: {
         parameters: {
             query?: never;
@@ -5340,9 +5291,11 @@ export interface operations {
                 "X-Cart-Token"?: string | null;
                 /** @description The session of the order's customer (`__Host-sid`). */
                 "X-Customer-Session"?: string | null;
+                /** @description Same-origin shop: the link grant from the `__Host-Http-cap` cookie (reads only). */
+                "X-Link-Grant"?: string | null;
             };
             path: {
-                /** @description Order capability token */
+                /** @description Order capability token, or the order id on a same-origin shop */
                 token: string;
             };
             cookie?: never;
@@ -5377,9 +5330,15 @@ export interface operations {
                 "X-Market": string;
                 /** @description Locale hint (one of the market's locales). */
                 "X-Locale"?: string | null;
+                /** @description The checkout cart capability the order was placed with (`__Host-cart`). */
+                "X-Cart-Token"?: string | null;
+                /** @description The session of the order's customer (`__Host-sid`). */
+                "X-Customer-Session"?: string | null;
+                /** @description Same-origin shop: the link grant from the `__Host-Http-cap` cookie (reads only). */
+                "X-Link-Grant"?: string | null;
             };
             path: {
-                /** @description Order capability token */
+                /** @description Order capability token, or the order id on a same-origin shop */
                 token: string;
             };
             cookie?: never;
@@ -5418,9 +5377,11 @@ export interface operations {
                 "X-Cart-Token"?: string | null;
                 /** @description The session of the order's customer (`__Host-sid`). */
                 "X-Customer-Session"?: string | null;
+                /** @description Same-origin shop: the link grant from the `__Host-Http-cap` cookie (reads only). */
+                "X-Link-Grant"?: string | null;
             };
             path: {
-                /** @description Order capability token */
+                /** @description Order capability token, or the order id on a same-origin shop */
                 token: string;
             };
             cookie?: never;
@@ -5459,9 +5420,11 @@ export interface operations {
                 "X-Cart-Token"?: string | null;
                 /** @description The session of the order's customer (`__Host-sid`). */
                 "X-Customer-Session"?: string | null;
+                /** @description Same-origin shop: the link grant from the `__Host-Http-cap` cookie (reads only). */
+                "X-Link-Grant"?: string | null;
             };
             path: {
-                /** @description Order capability token */
+                /** @description Order capability token, or the order id on a same-origin shop */
                 token: string;
             };
             cookie?: never;
@@ -5518,9 +5481,11 @@ export interface operations {
                 "X-Cart-Token"?: string | null;
                 /** @description The session of the order's customer (`__Host-sid`). */
                 "X-Customer-Session"?: string | null;
+                /** @description Same-origin shop: the link grant from the `__Host-Http-cap` cookie (reads only). */
+                "X-Link-Grant"?: string | null;
             };
             path: {
-                /** @description Order capability token */
+                /** @description Order capability token, or the order id on a same-origin shop */
                 token: string;
                 attempt: string;
             };
@@ -5578,9 +5543,11 @@ export interface operations {
                 "X-Cart-Token"?: string | null;
                 /** @description The session of the order's customer (`__Host-sid`). */
                 "X-Customer-Session"?: string | null;
+                /** @description Same-origin shop: the link grant from the `__Host-Http-cap` cookie (reads only). */
+                "X-Link-Grant"?: string | null;
             };
             path: {
-                /** @description Order capability token */
+                /** @description Order capability token, or the order id on a same-origin shop */
                 token: string;
                 attempt: string;
             };
