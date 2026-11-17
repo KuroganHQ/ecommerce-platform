@@ -152,10 +152,7 @@ test.describe("no engine here restores these no-store pages from the back-forwar
   });
 });
 
-test("the back button from the receipt never brings the review back", async ({
-  browser,
-  browserName,
-}) => {
+test("the back button from the order page never brings the review back", async ({ browser }) => {
   const context = await securityContext(browser);
   const page = await review(context);
   const placements: string[] = [];
@@ -169,25 +166,20 @@ test("the back button from the receipt never brings the review back", async ({
   });
   await acceptAndPlace(page);
   const number = await receiptNumber(page);
-  const firefox = browserName === "firefox";
   expect(
     (await page.evaluate(() => history.length)) - entries,
-    "the receipt gets its own history entry, except in Firefox, whose receipt replaces the review's entry of the same URL",
-  ).toBe(firefox ? 0 : 1);
+    "the order page gets its own history entry",
+  ).toBe(1);
   await page.goBack();
-  if (firefox) {
-    await expect(page, "Firefox has no review entry to go back to").toHaveURL(`${FRESH_HTTPS}/`);
-  } else {
-    await expect(page).toHaveURL(`${FRESH_HTTPS}/checkout`);
-    expect(await receiptNumber(page), "the same receipt").toBe(number);
-    expect(
-      await page.evaluate(() => ({
-        old: window.oldDocument ?? null,
-        type: (performance.getEntriesByType("navigation")[0] as PerformanceNavigationTiming).type,
-      })),
-      "no engine here restores a no-store checkout page from the back-forward cache: the back button loads it fresh",
-    ).toEqual({ old: null, type: "back_forward" });
-  }
+  await expect(page).toHaveURL(`${FRESH_HTTPS}/checkout`);
+  expect(await receiptNumber(page), "the receipt of the same order").toBe(number);
+  expect(
+    await page.evaluate(() => ({
+      old: window.oldDocument ?? null,
+      type: (performance.getEntriesByType("navigation")[0] as PerformanceNavigationTiming).type,
+    })),
+    "no engine here restores a no-store checkout page from the back-forward cache: the back button loads it fresh",
+  ).toEqual({ old: null, type: "back_forward" });
   await expect(placeButton(page), "never the review").toHaveCount(0);
   expect(placements, "the back button resends no placement").toHaveLength(1);
   await context.close();
