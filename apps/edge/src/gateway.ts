@@ -2089,6 +2089,7 @@ ${
     url: URL,
   ): Promise<Response> {
     if (req.method !== "GET") return text(405, "Method not allowed", { allow: "GET" });
+    if (url.searchParams.has("link")) return renderPlatform(site, req, url, {});
     const exchanged = await exchange(site, req, { kind: "withdrawal_request" });
     if (!exchanged) throw new Error("withdrawal request grant refused");
     const page = await renderPlatform(site, req, url, {

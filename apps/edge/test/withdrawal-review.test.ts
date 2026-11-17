@@ -226,6 +226,28 @@ describe("emailed withdrawal and review links exchange to grants on clean URLs (
   });
 });
 
+describe("a failed withdrawal link keeps the browser's grant through the whole redirect chain", () => {
+  test.each([
+    ["malformed", "xyz"],
+    ["unknown or expired", "0".repeat(64)],
+  ])("a %s link", async (_, token) => {
+    const cookie = `__Host-Http-cap=${REVIEW}`;
+    const first = await send(`${FRESH}/withdraw?t=${token}`, { ...NAVIGATE, cookie });
+    expect(first.status).toBe(303);
+    const location = first.headers.get("location") ?? "";
+    const landed = await send(`${FRESH}${location}`, { ...NAVIGATE, cookie });
+    expect(landed.status).toBe(200);
+    for (const res of [first, landed]) expect(res.headers.get("set-cookie")).toBeNull();
+    const minted = apiCalls("/link-grants").map(
+      (c) => (JSON.parse(c.body) as { link: { kind: string } }).link.kind,
+    );
+    expect(minted, "no request grant replaces the review grant").not.toContain(
+      "withdrawal_request",
+    );
+    expect(await landed.text()).not.toContain('name="page-token"');
+  });
+});
+
 describe("withdrawal pages render from the grant cookie (default 8)", () => {
   test("/withdraw mints an anonymous request grant and revokes the previous one", async () => {
     const res = await send(`${FRESH}/withdraw`, { ...NAVIGATE, cookie: `__Host-Http-cap=${OLD}` });

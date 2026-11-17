@@ -9,7 +9,8 @@ import { checkoutApi, grantPageToken, messages, shopUrl } from "../lib/api";
 const api = checkoutApi(Astro.request);
 const token = Astro.url.searchParams.get("t");
 const pageToken = grantPageToken(Astro.request);
-const invalidLink = token !== null || Astro.url.searchParams.get("link") === "invalid";
+const reopen = Astro.url.searchParams.get("link") === "invalid";
+const invalidLink = token !== null || reopen;
 const [shop, form] = await Promise.all([
   api.shop(),
   token !== null ? api.withdrawalForm(token) : null,
@@ -24,7 +25,7 @@ if (token !== null && !form) Astro.response.status = 404;
 const legalPages = shop?.legal_pages ?? [];
 ---
 
-<Checkout title={t(m, "withdraw.title")} shopName={shop?.name ?? ""} shopUrl={shopUrl(Astro.url)} lang={locale} accountLabel={t(m, "account.nav")} withdrawalLabel={t(m, "withdraw.title")} pageToken={pageToken} platformLinks={!pageToken}>
+<Checkout title={t(m, "withdraw.title")} shopName={shop?.name ?? ""} shopUrl={shopUrl(Astro.url)} lang={locale} accountLabel={t(m, "account.nav")} withdrawalLabel={t(m, "withdraw.title")} pageToken={pageToken} platformLinks={!pageToken && !reopen}>
   <div class="grid gap-5">
     <h1 class="font-display text-2xl font-bold">{t(m, "withdraw.title")}</h1>
     <p class="text-sm text-muted-foreground">{t(m, "withdraw.rights")}</p>
@@ -36,7 +37,11 @@ const legalPages = shop?.legal_pages ?? [];
       <WithdrawalHistory receipts={form.withdrawals} m={m} locale={locale} />
     </> : <>
       {invalidLink && <p role="alert">{t(m, "withdraw.link_invalid")}</p>}
-      <WithdrawalRequest client:load m={messages(m, "withdraw.")} />
+      {reopen ? (
+        <a href="/withdraw" class="text-identity-ink underline">{t(m, "withdraw.send")}</a>
+      ) : (
+        <WithdrawalRequest client:load m={messages(m, "withdraw.")} />
+      )}
     </>}
   </div>
 </Checkout>
