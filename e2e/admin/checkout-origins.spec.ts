@@ -1,9 +1,3 @@
-/**
- * SHOP-149: an owner records a checkout origin's history and switches its checkout mode from the
- * admin, on a dedicated tenant. Every switch ends the checkouts opened before it. The toggle needs
- * an API started with `SAME_ORIGIN_CHECKOUT_READY=1`; without it the switch is refused instead.
- */
-
 import {
   type APIRequestContext,
   type Browser,
@@ -53,7 +47,6 @@ async function adminApi(request: APIRequestContext) {
   };
 }
 
-/** A sellable product: tax profile, a CZK price list, one active priced variant in stock. */
 async function sellable(request: APIRequestContext): Promise<string> {
   const api = await adminApi(request);
   const markets = (await (await api.get("/markets")).json()) as {
@@ -92,8 +85,7 @@ async function sellable(request: APIRequestContext): Promise<string> {
   return id;
 }
 
-/** A shopper's isolated checkout, opened through the shop's handoff; the probe reads it back. */
-async function openCheckout(): Promise<() => Promise<number>> {
+async function openCheckout(): Promise<{ status: () => Promise<number> }> {
   const shopper = await (await testContext(browser)).newPage();
   await shopper.goto(`${shop}/`);
   const added = await shopper.request.post(`${shop}/_p/cart/lines`, {
@@ -102,14 +94,14 @@ async function openCheckout(): Promise<() => Promise<number>> {
   });
   expect(added.status()).toBe(200);
   await Promise.all([shopper.waitForURL(`${checkoutOf(shop)}/`), submitStart(shopper)]);
-  const probe = async () =>
+  const status = async () =>
     (
       await shopper.request.get(`${checkoutOf(shop)}/_p/checkout`, {
         headers: rateHeaders(shopper),
       })
     ).status();
-  expect(await probe(), "the checkout is open").toBe(200);
-  return probe;
+  expect(await status(), "the checkout is open").toBe(200);
+  return { status };
 }
 
 async function switchMode(to: "Switch to same-origin" | "Switch to isolated") {
@@ -197,10 +189,10 @@ test("isolated -> same-origin -> isolated, each switch revoking the open checkou
   const first = await openCheckout();
   await switchMode("Switch to same-origin");
   await expect(row()).toContainText("Same-origin");
-  expect(await first(), "the checkout from before the switch is revoked").toBe(404);
+  expect(await first.status(), "the checkout from before the switch is revoked").toBe(404);
 
   const second = await openCheckout();
   await switchMode("Switch to isolated");
   await expect(row()).toContainText("Isolated");
-  expect(await second(), "the checkout from before the rollback is revoked").toBe(404);
+  expect(await second.status(), "the checkout from before the rollback is revoked").toBe(404);
 });
