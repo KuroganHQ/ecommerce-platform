@@ -164,7 +164,11 @@ async fn guard(
     ))
 }
 
-async fn bind(tx: &mut TenantTx, cart_id: Uuid, p: &Policy<'_>) -> Result<Option<String>, Error> {
+pub(crate) async fn bind(
+    tx: &mut TenantTx,
+    cart_id: Uuid,
+    p: &Policy<'_>,
+) -> Result<Option<String>, Error> {
     let minted = capability::mint();
     let updated = sqlx::query!(
         "UPDATE carts SET checkout_token_hash = $2, checkout_origin = $3, checkout_generation = $4,
@@ -253,6 +257,17 @@ pub(crate) async fn open_in(
     Ok(guard(tx, ctx, &p, token, Reach::Open { refresh: true })
         .await?
         .0)
+}
+
+pub(crate) async fn open_same_origin<'a>(
+    tx: &mut TenantTx,
+    ctx: &'a Context,
+    token: &str,
+) -> Result<(CartRef, Policy<'a>), Error> {
+    let p = enter(tx, ctx).await?;
+    require(&p, CheckoutMode::SameOrigin)?;
+    let (c, _) = guard(tx, ctx, &p, token, Reach::Open { refresh: true }).await?;
+    Ok((c, p))
 }
 
 /// The shop capability's cart, else the checkout as in [`open`] (`GET /cart`).

@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM checkout_identities\n         WHERE consumed_at IS NULL AND (cart_id = $1 OR expires_at < now())",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "dc6a4ec4b127f5512dce028aac797224ea36b8ce7dc7d47cdb0a3faabe4f57c2"
+}

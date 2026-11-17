@@ -3903,6 +3903,48 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/storefront/v1/checkout/identify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * A2.1, same-origin mode: a fresh 5-minute single-use `state` bound to the checkout's
+         *     capability, origin and generation, for the sign-in round trip through the account origin.
+         */
+        post: operations["identify_start"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/storefront/v1/checkout/identify/callback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * A2.3, same-origin mode: consumes the identify `state` and the account code in one
+         *     transaction, links the checkout to the code's account as a prefill hint and replaces the
+         *     capability (C6). The new capability comes back only in `X-Cart-Token`; the body is empty.
+         *     A mismatched, unsolicited, reused or expired callback is `404` and consumes nothing.
+         */
+        post: operations["identify_callback"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/storefront/v1/checkout/order": {
         parameters: {
             query?: never;
@@ -3957,6 +3999,26 @@ export interface paths {
          *     the same transaction; then the payment attempt is initialized at the provider (A10).
          */
         post: operations["place_order"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/storefront/v1/checkout/saved-addresses": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * A2 prefill hint, same-origin mode: the saved addresses of the account the checkout was
+         *     identified with (none before identify). For the checkout page's server render only.
+         */
+        get: operations["saved_addresses"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -7286,6 +7348,18 @@ export interface components {
             /** @description Draft request for the AI theme editor; staff edit and start it themselves. */
             theme_prompt: string;
         };
+        IdentifyCallback: {
+            /** @description The account origin's identify code, from the callback URL. */
+            code?: string;
+            /** @description The browser's `__Host-Http-idt` cookie. */
+            idt?: string;
+            /** @description From the callback URL. */
+            state?: string;
+        };
+        IdentifyStart: {
+            /** @description For the account origin's `/identify` and the browser's `__Host-Http-idt` cookie (edge only). */
+            state: string;
+        };
         /**
          * @description An image with every generated width. Render `srcset` (AVIF) with a `sizes` that matches the
          *     real slot; `src` is a JPEG/PNG fallback. `width`/`height` are the intrinsic size of the
@@ -9561,6 +9635,9 @@ export interface components {
             name: string;
             /** Format: uuid */
             product_id: string;
+        };
+        SavedAddresses: {
+            items: components["schemas"]["Address"][];
         };
         ScheduleInput: {
             /**
@@ -21068,6 +21145,121 @@ export interface operations {
             };
         };
     };
+    identify_start: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description The tenant's public storefront token. */
+                "X-Storefront-Token": string;
+                /** @description Market id resolved from the shop host by the edge. */
+                "X-Market": string;
+                /** @description Locale hint (one of the market's locales). */
+                "X-Locale"?: string | null;
+                /** @description Cart capability from the `cart` cookie (shop) or `__Host-cart` (checkout origin). */
+                "X-Cart-Token": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IdentifyStart"];
+                };
+            };
+            /** @description shop_origin_required | shop_origin_mismatch */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description No open checkout behind the capability */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description checkout_mode_changed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    identify_callback: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description The tenant's public storefront token. */
+                "X-Storefront-Token": string;
+                /** @description Market id resolved from the shop host by the edge. */
+                "X-Market": string;
+                /** @description Locale hint (one of the market's locales). */
+                "X-Locale"?: string | null;
+                /** @description Cart capability from the `cart` cookie (shop) or `__Host-cart` (checkout origin). */
+                "X-Cart-Token": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IdentifyCallback"];
+            };
+        };
+        responses: {
+            /** @description Identified */
+            204: {
+                headers: {
+                    /** @description The replacing checkout capability (for the edge only) */
+                    "X-Cart-Token"?: string;
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description shop_origin_required | shop_origin_mismatch */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Rejected */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description checkout_mode_changed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
     get_order: {
         parameters: {
             query?: never;
@@ -21218,6 +21410,52 @@ export interface operations {
             };
             /** @description legal_consent_required | checkout_incomplete | ship_to_not_allowed */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    saved_addresses: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description The tenant's public storefront token. */
+                "X-Storefront-Token": string;
+                /** @description Market id resolved from the shop host by the edge. */
+                "X-Market": string;
+                /** @description Locale hint (one of the market's locales). */
+                "X-Locale"?: string | null;
+                /** @description Cart capability from the `cart` cookie (shop) or `__Host-cart` (checkout origin). */
+                "X-Cart-Token": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SavedAddresses"];
+                };
+            };
+            /** @description No open checkout behind the capability */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description checkout_mode_changed */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

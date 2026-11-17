@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE checkout_identities SET consumed_at = now(), customer_id = $6\n           WHERE state_hash = $1 AND cart_id = $2 AND capability_hash = $3\n             AND origin = $4 AND generation = $5\n             AND consumed_at IS NULL AND expires_at > now()\n           RETURNING 1 AS \"one!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "one!",
+        "type_info": "Int4",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Bytea",
+        "Uuid",
+        "Bytea",
+        "Text",
+        "Int8",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "ed246d33c097080df26dd584a26b1db40b1fd214b99778610de3e6acf816f4c1"
+}

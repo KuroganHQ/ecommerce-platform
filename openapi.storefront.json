@@ -1390,6 +1390,202 @@
         }
       }
     },
+    "/storefront/v1/checkout/identify": {
+      "post": {
+        "tags": [
+          "storefront"
+        ],
+        "summary": "A2.1, same-origin mode: a fresh 5-minute single-use `state` bound to the checkout's\ncapability, origin and generation, for the sign-in round trip through the account origin.",
+        "operationId": "identify_start",
+        "parameters": [
+          {
+            "name": "X-Storefront-Token",
+            "in": "header",
+            "description": "The tenant's public storefront token.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Market",
+            "in": "header",
+            "description": "Market id resolved from the shop host by the edge.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-Locale",
+            "in": "header",
+            "description": "Locale hint (one of the market's locales).",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "X-Cart-Token",
+            "in": "header",
+            "description": "Cart capability from the `cart` cookie (shop) or `__Host-cart` (checkout origin).",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IdentifyStart"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "shop_origin_required | shop_origin_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No open checkout behind the capability",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "checkout_mode_changed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/storefront/v1/checkout/identify/callback": {
+      "post": {
+        "tags": [
+          "storefront"
+        ],
+        "summary": "A2.3, same-origin mode: consumes the identify `state` and the account code in one\ntransaction, links the checkout to the code's account as a prefill hint and replaces the\ncapability (C6). The new capability comes back only in `X-Cart-Token`; the body is empty.\nA mismatched, unsolicited, reused or expired callback is `404` and consumes nothing.",
+        "operationId": "identify_callback",
+        "parameters": [
+          {
+            "name": "X-Storefront-Token",
+            "in": "header",
+            "description": "The tenant's public storefront token.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Market",
+            "in": "header",
+            "description": "Market id resolved from the shop host by the edge.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-Locale",
+            "in": "header",
+            "description": "Locale hint (one of the market's locales).",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "X-Cart-Token",
+            "in": "header",
+            "description": "Cart capability from the `cart` cookie (shop) or `__Host-cart` (checkout origin).",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IdentifyCallback"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Identified",
+            "headers": {
+              "X-Cart-Token": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "The replacing checkout capability (for the edge only)"
+              }
+            }
+          },
+          "403": {
+            "description": "shop_origin_required | shop_origin_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Rejected",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "checkout_mode_changed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/storefront/v1/checkout/order": {
       "get": {
         "tags": [
@@ -1674,6 +1870,88 @@
           },
           "422": {
             "description": "legal_consent_required | checkout_incomplete | ship_to_not_allowed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/storefront/v1/checkout/saved-addresses": {
+      "get": {
+        "tags": [
+          "storefront"
+        ],
+        "summary": "A2 prefill hint, same-origin mode: the saved addresses of the account the checkout was\nidentified with (none before identify). For the checkout page's server render only.",
+        "operationId": "saved_addresses",
+        "parameters": [
+          {
+            "name": "X-Storefront-Token",
+            "in": "header",
+            "description": "The tenant's public storefront token.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Market",
+            "in": "header",
+            "description": "Market id resolved from the shop host by the edge.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-Locale",
+            "in": "header",
+            "description": "Locale hint (one of the market's locales).",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "X-Cart-Token",
+            "in": "header",
+            "description": "Cart capability from the `cart` cookie (shop) or `__Host-cart` (checkout origin).",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SavedAddresses"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No open checkout behind the capability",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "checkout_mode_changed",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -8841,6 +9119,35 @@
           }
         }
       },
+      "IdentifyCallback": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "The account origin's identify code, from the callback URL."
+          },
+          "idt": {
+            "type": "string",
+            "description": "The browser's `__Host-Http-idt` cookie."
+          },
+          "state": {
+            "type": "string",
+            "description": "From the callback URL."
+          }
+        }
+      },
+      "IdentifyStart": {
+        "type": "object",
+        "required": [
+          "state"
+        ],
+        "properties": {
+          "state": {
+            "type": "string",
+            "description": "For the account origin's `/identify` and the browser's `__Host-Http-idt` cookie (edge only)."
+          }
+        }
+      },
       "Image": {
         "type": "object",
         "description": "An image with every generated width. Render `srcset` (AVIF) with a `sizes` that matches the\nreal slot; `src` is a JPEG/PNG fallback. `width`/`height` are the intrinsic size of the\nlargest variant (use them for the aspect ratio: no layout shift).",
@@ -10744,6 +11051,20 @@
           },
           "text": {
             "type": "string"
+          }
+        }
+      },
+      "SavedAddresses": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Address"
+            }
           }
         }
       },

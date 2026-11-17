@@ -16,6 +16,7 @@ use commerce::checkout::{
     PlaceOrderInput, Placer, ShippingInput,
 };
 use commerce::checkout_access;
+use commerce::checkout_identity;
 use commerce::customers;
 use commerce::idempotency;
 use commerce::money::MoneyView;
@@ -43,6 +44,9 @@ pub fn routes() -> OpenApiRouter<AppState> {
         .routes(routes!(put_contact))
         .routes(routes!(put_addresses))
         .routes(routes!(post_details))
+        .routes(routes!(identify_start))
+        .routes(routes!(identify_callback))
+        .routes(routes!(saved_addresses))
         .routes(routes!(put_shipping))
         .routes(routes!(put_payment))
         .routes(routes!(place_order))
@@ -209,12 +213,127 @@ async fn post_details(
         checkout::set_same_origin_details(tx, ctx, &token, &details).await
     })
     .await?;
-    let mut res = StatusCode::NO_CONTENT.into_response();
+    with_capability(StatusCode::NO_CONTENT.into_response(), &rotated)
+}
+
+fn with_capability(res: Response, capability: &str) -> Result<Response, Error> {
+    let mut res = res;
     res.headers_mut().insert(
         CART_HEADER,
-        HeaderValue::from_str(&rotated).map_err(|e| Error::Internal(e.to_string()))?,
+        HeaderValue::from_str(capability).map_err(|e| Error::Internal(e.to_string()))?,
     );
     Ok(no_store(res))
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct IdentifyStart {
+    /// For the account origin's `/identify` and the browser's `__Host-Http-idt` cookie (edge only).
+    pub state: String,
+}
+
+/// A2.1, same-origin mode: a fresh 5-minute single-use `state` bound to the checkout's
+/// capability, origin and generation, for the sign-in round trip through the account origin.
+#[utoipa::path(
+    post,
+    path = "/storefront/v1/checkout/identify",
+    tag = "storefront",
+    params(StorefrontHeaders, CartHeader),
+    responses(
+        (status = 201, body = IdentifyStart),
+        (status = 403, description = "shop_origin_required | shop_origin_mismatch", body = platform::Problem, content_type = "application/problem+json"),
+        (status = 404, description = "No open checkout behind the capability", body = platform::Problem, content_type = "application/problem+json"),
+        (status = 409, description = "checkout_mode_changed", body = platform::Problem, content_type = "application/problem+json"),
+    )
+)]
+async fn identify_start(
+    shopper: Shopper,
+    State(s): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Response, Error> {
+    let token = cart_token(&headers)?;
+    let state = with_ctx(&s, &shopper, async |tx, ctx| {
+        checkout_identity::start(tx, ctx, &token).await
+    })
+    .await?;
+    Ok(no_store(
+        (StatusCode::CREATED, Json(IdentifyStart { state })).into_response(),
+    ))
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct IdentifyCallback {
+    /// From the callback URL.
+    #[serde(default)]
+    pub state: String,
+    /// The browser's `__Host-Http-idt` cookie.
+    #[serde(default)]
+    pub idt: String,
+    /// The account origin's identify code, from the callback URL.
+    #[serde(default)]
+    pub code: String,
+}
+
+/// A2.3, same-origin mode: consumes the identify `state` and the account code in one
+/// transaction, links the checkout to the code's account as a prefill hint and replaces the
+/// capability (C6). The new capability comes back only in `X-Cart-Token`; the body is empty.
+/// A mismatched, unsolicited, reused or expired callback is `404` and consumes nothing.
+#[utoipa::path(
+    post,
+    path = "/storefront/v1/checkout/identify/callback",
+    tag = "storefront",
+    params(StorefrontHeaders, CartHeader),
+    request_body = IdentifyCallback,
+    responses(
+        (status = 204, description = "Identified", headers(("X-Cart-Token" = String, description = "The replacing checkout capability (for the edge only)"))),
+        (status = 403, description = "shop_origin_required | shop_origin_mismatch", body = platform::Problem, content_type = "application/problem+json"),
+        (status = 404, description = "Rejected", body = platform::Problem, content_type = "application/problem+json"),
+        (status = 409, description = "checkout_mode_changed", body = platform::Problem, content_type = "application/problem+json"),
+    )
+)]
+async fn identify_callback(
+    shopper: Shopper,
+    State(s): State<AppState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<Response, Error> {
+    let input: IdentifyCallback = parse_json(&body)?;
+    let token = cart_token(&headers)?;
+    let rotated = with_ctx(&s, &shopper, async |tx, ctx| {
+        checkout_identity::callback(tx, ctx, &token, &input.state, &input.idt, &input.code).await
+    })
+    .await?;
+    with_capability(StatusCode::NO_CONTENT.into_response(), &rotated)
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct SavedAddresses {
+    pub items: Vec<customers::Address>,
+}
+
+/// A2 prefill hint, same-origin mode: the saved addresses of the account the checkout was
+/// identified with (none before identify). For the checkout page's server render only.
+#[utoipa::path(
+    get,
+    path = "/storefront/v1/checkout/saved-addresses",
+    tag = "storefront",
+    params(StorefrontHeaders, CartHeader),
+    responses(
+        (status = 200, body = SavedAddresses),
+        (status = 404, description = "No open checkout behind the capability", body = platform::Problem, content_type = "application/problem+json"),
+        (status = 409, description = "checkout_mode_changed", body = platform::Problem, content_type = "application/problem+json"),
+    )
+)]
+async fn saved_addresses(
+    shopper: Shopper,
+    State(s): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Response, Error> {
+    let token = cart_token(&headers)?;
+    let items = with_ctx(&s, &shopper, async |tx, ctx| {
+        checkout_identity::saved_addresses(tx, ctx, &token).await
+    })
+    .await?;
+    Ok(no_store(Json(SavedAddresses { items }).into_response()))
 }
 
 #[utoipa::path(

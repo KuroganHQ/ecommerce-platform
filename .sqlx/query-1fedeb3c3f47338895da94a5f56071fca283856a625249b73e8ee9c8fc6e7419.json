@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO checkout_identities\n             (state_hash, tenant_id, cart_id, capability_hash, origin, generation, expires_at)\n         VALUES ($1, $2, $3, $4, $5, $6, now() + make_interval(secs => $7))",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Bytea",
+        "Uuid",
+        "Uuid",
+        "Bytea",
+        "Text",
+        "Int8",
+        "Float8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "1fedeb3c3f47338895da94a5f56071fca283856a625249b73e8ee9c8fc6e7419"
+}
