@@ -374,6 +374,20 @@ test("the account origin and the checkout share no session", async ({ browser, b
     return { own, cross };
   }, FRESH_HTTPS);
   expect(fromAccount, "account pages reach no checkout").toEqual({ own: 404, cross: "refused" });
+
+  const secrets = (await context.cookies())
+    .filter((c) => c.name.startsWith("__Host-"))
+    .map((c) => c.value);
+  expect(secrets.length, "a capability and an account session").toBeGreaterThanOrEqual(2);
+  for (const tab of [theme, accountPage]) {
+    const stored = await tab.evaluate(() =>
+      JSON.stringify([Object.entries(localStorage), Object.entries(sessionStorage)]),
+    );
+    for (const secret of secrets)
+      expect(stored, `${new URL(tab.url()).origin} storage holds no credential`).not.toContain(
+        secret,
+      );
+  }
   await context.close();
 });
 
