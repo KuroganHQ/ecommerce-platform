@@ -167,7 +167,6 @@ impl Context {
         format!("{}{path}", checkout_base(&self.base_url))
     }
 
-    /// A URL on the market's account origin (A1).
     pub fn account_url(&self, path: &str) -> String {
         format!("{}{path}", self.account_base)
     }

@@ -228,7 +228,6 @@ async fn magic_link_requests_do_not_reveal_accounts_and_are_rate_limited(db: PgP
         .await
         .unwrap();
     assert_eq!(customers, 0);
-    // The stored redirect was sanitized; the email carries the account-origin link.
     let (redirect, text): (String, String) = sqlx::query_as(
         "SELECT l.redirect, m.body_text FROM customer_magic_links l, email_messages m LIMIT 1",
     )

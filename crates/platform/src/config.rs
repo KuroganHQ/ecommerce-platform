@@ -343,8 +343,7 @@ pub struct StorefrontConfig {
     /// `EDGE_PURGE_TOKEN`: the edge's own purge token (distinct service token, A7).
     pub edge_purge_token: String,
     pub experiments_secret: Option<String>,
-    /// `ACCOUNT_DOMAIN`: the registrable domain of customer account origins (A1). Required by
-    /// the API and the worker, which build account URLs.
+    /// `ACCOUNT_DOMAIN`: the registrable domain of customer account origins (A1).
     pub account_domain: Option<String>,
 }
 

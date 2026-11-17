@@ -102,7 +102,6 @@ test("email-link sign-in on the account origin creates the account", async () =>
   await page.getByRole("button", { name: "Přihlásit se" }).click();
   await expect(page.getByRole("alert")).toContainText("Odkaz vypršel");
 
-  // The session cookie is host-only on the account origin and invisible to scripts.
   const cookies = await page.context().cookies(account);
   const sid = cookies.find((c) => c.name === "__Host-sid");
   expect(sid?.httpOnly).toBe(true);
@@ -111,7 +110,6 @@ test("email-link sign-in on the account origin creates the account", async () =>
   for (const origin of [shop, checkout, ACCOUNT_SK])
     expect((await page.context().cookies(origin)).some((c) => c.name === "__Host-sid")).toBe(false);
 
-  // Shop links lead back to the shop, not to this origin.
   await expect(page.getByRole("banner").getByRole("link").first()).toHaveAttribute(
     "href",
     `${shop}/`,
@@ -207,7 +205,6 @@ test("email_preferences_save_and_reload", async () => {
   await page.getByRole("link", { name: /Soukromí a souhlasy/ }).click();
   await expect(page).toHaveURL(`${account}/account/consent`);
   await expect(page.getByRole("heading", { level: 1, name: "Soukromí a souhlasy" })).toBeVisible();
-  // Email purposes only: cookie choices belong to the browser on the shop.
   await expect(page.getByRole("checkbox")).toHaveCount(2);
   const newsletter = page.getByRole("checkbox", { name: "E-mailový marketing" });
   await expect(newsletter).not.toBeChecked();
@@ -217,10 +214,8 @@ test("email_preferences_save_and_reload", async () => {
   await expect(page.getByRole("status")).toHaveText("Uloženo.");
   await page.reload();
   await expect(page.getByRole("checkbox", { name: "E-mailový marketing" })).toBeChecked();
-  // The shop got no consent cookie from it.
   expect((await page.context().cookies(shop)).some((c) => c.name === "consent")).toBe(false);
 
-  // Withdrawn the same way.
   await page.getByText("E-mailový marketing", { exact: true }).click();
   await page.getByRole("button", { name: "Uložit výběr" }).click();
   await expect(page.getByRole("status")).toHaveText("Uloženo.");

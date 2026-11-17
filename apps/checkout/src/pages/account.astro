@@ -5,7 +5,6 @@ import SignOut from "../islands/SignOut";
 import Checkout from "../layouts/Checkout.astro";
 import { accountLinks, checkoutApi, messages } from "../lib/api";
 
-// Customer accounts: the account origin (A1), and the checkout origin until SHOP-95 slice 2.
 const api = checkoutApi(Astro.request);
 const [shop, me] = await Promise.all([api.shop(), api.me()]);
 const orders = me ? await api.orders() : [];

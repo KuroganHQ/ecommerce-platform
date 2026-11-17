@@ -140,7 +140,6 @@ const CART_OPS: { method: string; path: RegExp }[] = [
   { method: "DELETE", path: /^\/coupons\/[A-Za-z0-9_-]{1,64}$/ },
 ];
 
-/** Customer account operations (`/_p/account/*`, WP9, A1, A4, A5). */
 const ACCOUNT_OPS: { method: string; path: RegExp }[] = [
   { method: "GET", path: /^\/consent$/ },
   { method: "POST", path: /^\/consent$/ },
@@ -185,7 +184,6 @@ const ORDER_OPS: { method: string; path: RegExp }[] = [
 ];
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-/** The pages an account origin serves (A1). */
 const ACCOUNT_PAGE_RE =
   /^\/account(?:\/(?:addresses|security|verify|consent)|\/orders\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})?$/;
 /** Where the fake pay page may send the customer back to: the order page only. */
@@ -740,10 +738,6 @@ export function createGateway(opts: GatewayOptions) {
     return req.headers.get("sec-fetch-site") === "same-origin";
   }
 
-  /**
-   * The account origin (A1) accepts only same-origin Fetch Metadata, on every method: a
-   * same-site theme could otherwise send credentialed requests that `SameSite` lets through.
-   */
   function sameOriginFetch(req: Request, host: string, port: string) {
     if (req.headers.get("sec-fetch-site") !== "same-origin") return false;
     const origin = req.headers.get("origin");
@@ -770,12 +764,6 @@ export function createGateway(opts: GatewayOptions) {
     return v && TOKEN_RE.test(v) ? v : undefined;
   };
 
-  /**
-   * `/_p/account/*` → `/storefront/v1/customer/*`. Same-origin JSON only (CSRF, §14); the
-   * session goes to the API as a header, and only the edge ever sees the session token (it
-   * comes back in `x-session-token`). On the checkout origin the cart and consent subject go
-   * along; the account origin forwards neither and requires same-origin Fetch Metadata.
-   */
   async function accountProxy(
     site: Site,
     req: Request,
@@ -787,7 +775,6 @@ export function createGateway(opts: GatewayOptions) {
   ): Promise<Response> {
     const op = ACCOUNT_OPS.find((o) => o.method === req.method && o.path.test(rest));
     if (!op) return problem(404, "not_found", "unknown account operation");
-    // CSRF (§14): SameSite=Lax plus a same-origin check on every state-changing call.
     const allowed = accountOrigin
       ? sameOriginFetch(req, host, port)
       : req.method === "GET" || sameOrigin(req, host, port);
@@ -2156,10 +2143,6 @@ ${
     return new Response(req.method === "HEAD" ? null : r.body, { status: r.status, headers });
   }
 
-  /**
-   * `<label>.<account domain>` (A1): the account pages of the checkout artifact and their API,
-   * nothing else. No theme code, cart, checkout or consent cookie reaches this origin.
-   */
   async function account(
     site: Site,
     req: Request,

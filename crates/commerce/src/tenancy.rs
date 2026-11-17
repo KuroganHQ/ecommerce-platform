@@ -479,7 +479,6 @@ pub async fn resolve_host(db: &PgPool, host: &str) -> Result<Option<Resolved>, E
     }))
 }
 
-/// The primary verified domain of the market an account label names.
 async fn account_shop_host(db: &PgPool, label: &str) -> Result<Option<String>, Error> {
     if label.contains('.') {
         return Ok(None);

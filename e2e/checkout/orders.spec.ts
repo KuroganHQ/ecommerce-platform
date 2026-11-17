@@ -409,8 +409,6 @@ test("a signed-in customer finds the order in the account", async ({ browser }) 
   const page = await newPage(browser);
   const email = `ucet-${run}@example.test`;
   await toCheckout(page, CZ, "tricko-henley");
-  // Email links land on the account origin; until SHOP-95 slice 2 the checkout origin still
-  // takes a password sign-in.
   await signIn(page, email, "/account/security");
   const password = "správné koňské heslo";
   await page.getByLabel("Nové heslo").fill(password);

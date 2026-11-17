@@ -311,7 +311,6 @@ services:
       # Canonical storefront URLs (sitemaps, hreflang) and edge cache purges (spec §9.3).
       PUBLIC_STOREFRONT_SCHEME: http
       PUBLIC_STOREFRONT_PORT: ${HTTP_PORT:-8080}
-      # SHOP-95: account origins are <slug>.<ACCOUNT_DOMAIN> (A1).
       ACCOUNT_DOMAIN: ${ACCOUNT_DOMAIN:-accounts.localhost}
       EDGE_PURGE_URL: http://edge:8788/_edge/purge
       EDGE_PURGE_TOKEN: ${EDGE_PURGE_TOKEN:-local-edge-purge-token-0123456789}
@@ -386,7 +385,6 @@ services:
       # Export feed URLs and edge purges after catalog/content changes (WP13a, A2).
       PUBLIC_STOREFRONT_SCHEME: http
       PUBLIC_STOREFRONT_PORT: ${HTTP_PORT:-8080}
-      # SHOP-95: account origins are <slug>.<ACCOUNT_DOMAIN> (A1).
       ACCOUNT_DOMAIN: ${ACCOUNT_DOMAIN:-accounts.localhost}
       EDGE_PURGE_URL: http://edge:8788/_edge/purge
       EDGE_PURGE_TOKEN: ${EDGE_PURGE_TOKEN:-local-edge-purge-token-0123456789}

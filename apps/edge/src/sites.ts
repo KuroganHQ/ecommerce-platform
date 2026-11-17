@@ -3,7 +3,6 @@
  * `GET /internal/v1/resolve?host=` (spec §8.4) by `ApiResolver`.
  */
 export interface Site {
-  /** `account`: `<label>.<account domain>`, which serves customer accounts only (A1). */
   kind?: "shop" | "account";
   tenant_id: string;
   market_id: string;
