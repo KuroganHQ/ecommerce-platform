@@ -399,7 +399,6 @@ export const themeRequests = (page: Page, requests: [string, string][]) =>
     requests,
   );
 
-/** Every `Location` the page's responses carry, to show no redirect echoes an emailed link. */
 export function redirectLocations(page: Page): string[] {
   const seen: string[] = [];
   page.on("response", (r) => {
@@ -409,7 +408,6 @@ export function redirectLocations(page: Page): string[] {
   return seen;
 }
 
-/** A link page on a grant: one `_pt`, no bearer field, the link nowhere a script or log sees it. */
 export async function expectGrantPage(
   page: Page,
   token: string,
@@ -434,7 +432,6 @@ export async function expectGrantPage(
   await expectAccessible(page, name);
 }
 
-/** Submits a navigation form and returns the 303 `Location` once the next page commits. */
 export async function postForm(
   page: Page,
   path: string,
@@ -452,7 +449,6 @@ export async function postForm(
   return res.headers().location ?? "";
 }
 
-/** A fresh emailed-link token and the SHA-256 the database stores for it. */
 export function linkToken(): { token: string; hash: string } {
   const token = randomBytes(32).toString("hex");
   return { token, hash: createHash("sha256").update(token).digest("hex") };
