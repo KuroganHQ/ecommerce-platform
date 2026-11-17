@@ -32,7 +32,10 @@ const FORM = {
 const REFUSED: [string, Record<string, string>][] = [
   ["prefetch", { ...NAVIGATE, "sec-purpose": "prefetch" }],
   ["prerender", { ...NAVIGATE, "sec-purpose": "prefetch;prerender" }],
-  ["fetch", { "sec-fetch-site": "same-origin", "sec-fetch-mode": "cors", "sec-fetch-dest": "empty" }],
+  [
+    "fetch",
+    { "sec-fetch-site": "same-origin", "sec-fetch-mode": "cors", "sec-fetch-dest": "empty" },
+  ],
   ["iframe", { ...NAVIGATE, "sec-fetch-dest": "iframe" }],
 ];
 
@@ -173,30 +176,40 @@ afterAll(async () => {
 });
 
 describe("newsletter, watch, flow and restore links exchange before render (C5)", () => {
-  test.each(LINKS)("%s answers 303 to %s's clean page with the grant", async (prefix, kind, clean) => {
-    const res = await send(`${FRESH}${prefix}${LINK}`, {
-      ...NAVIGATE,
-      cookie: `__Host-Http-cap=${OLD}`,
-    });
-    expect(res.status).toBe(303);
-    expect(res.headers.get("location")).toBe(clean);
-    expect(res.headers.get("set-cookie")).toBe(
-      `__Host-Http-cap=${GRANT}; Path=/; HttpOnly; Secure; SameSite=Lax`,
-    );
-    expect(res.headers.get("cache-control")).toBe("no-store");
-    expect(calls.map((c) => JSON.parse(c.body))).toEqual([
-      { link: { kind, token: LINK }, previous: OLD },
-    ]);
-  });
+  test.each(LINKS)(
+    "%s answers 303 to %s's clean page with the grant",
+    async (prefix, kind, clean) => {
+      const res = await send(`${FRESH}${prefix}${LINK}`, {
+        ...NAVIGATE,
+        cookie: `__Host-Http-cap=${OLD}`,
+      });
+      expect(res.status).toBe(303);
+      expect(res.headers.get("location")).toBe(clean);
+      expect(res.headers.get("set-cookie")).toBe(
+        `__Host-Http-cap=${GRANT}; Path=/; HttpOnly; Secure; SameSite=Lax`,
+      );
+      expect(res.headers.get("cache-control")).toBe("no-store");
+      expect(calls.map((c) => JSON.parse(c.body))).toEqual([
+        { link: { kind, token: LINK }, previous: OLD },
+      ]);
+    },
+  );
 
-  test.each(LINKS)("%s fails closed and keeps the browser's grant", async (prefix, _kind, clean) => {
-    for (const bad of [`${prefix}${"0".repeat(64)}`, `${prefix}xyz`, `${prefix}${LINK}&t=${LINK}&token=${LINK}`]) {
-      const res = await send(`${FRESH}${bad}`, { ...NAVIGATE, cookie: `__Host-Http-cap=${OLD}` });
-      expect(res.status, bad).toBe(303);
-      expect(res.headers.get("location"), bad).toBe(`${clean}?link=invalid`);
-      expect(res.headers.get("set-cookie"), bad).toBeNull();
-    }
-  });
+  test.each(LINKS)(
+    "%s fails closed and keeps the browser's grant",
+    async (prefix, _kind, clean) => {
+      for (const bad of [
+        `${prefix}${"0".repeat(64)}`,
+        `${prefix}xyz`,
+        `${prefix}${LINK}&t=${LINK}&token=${LINK}`,
+      ]) {
+        const res = await send(`${FRESH}${bad}`, { ...NAVIGATE, cookie: `__Host-Http-cap=${OLD}` });
+        expect(res.status, bad).toBe(303);
+        expect(res.headers.get("location"), bad).toBe(`${clean}?link=invalid`);
+        expect(res.headers.get("set-cookie"), bad).toBeNull();
+      }
+    },
+  );
 
   const routes = LINKS.flatMap(([prefix]) => REFUSED.map(([how, h]) => [prefix, how, h] as const));
   test.each(routes)("%s refuses a %s request without calling the API", async (prefix, _how, h) => {
@@ -207,7 +220,10 @@ describe("newsletter, watch, flow and restore links exchange before render (C5)"
   });
 
   test("a clean page renders the grant's page token and no link", async () => {
-    const res = await send(`${FRESH}/newsletter`, { ...NAVIGATE, cookie: `__Host-Http-cap=${GRANT}` });
+    const res = await send(`${FRESH}/newsletter`, {
+      ...NAVIGATE,
+      cookie: `__Host-Http-cap=${GRANT}`,
+    });
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).toContain(tokenOf(GRANT));
@@ -228,27 +244,40 @@ describe("confirmation, preference and unsubscribe forms use the grant and _pt (
     expect(calls[0]?.body).toBe("");
   });
 
-  test.each(FORMS)("POST %s with a stale, missing or doubled _pt reloads its page", async (form, _a, _d, page) => {
-    for (const body of [`_pt=${tokenOf(OLD)}`, "", `_pt=${tokenOf(GRANT)}&_pt=${tokenOf(GRANT)}`]) {
-      const res = await post(form, body, { cookie: `__Host-Http-cap=${GRANT}` });
-      expect(res.status, body).toBe(303);
-      expect(res.headers.get("location"), body).toBe(page);
-    }
-    expect(calls).toEqual([]);
-  });
+  test.each(FORMS)(
+    "POST %s with a stale, missing or doubled _pt reloads its page",
+    async (form, _a, _d, page) => {
+      for (const body of [
+        `_pt=${tokenOf(OLD)}`,
+        "",
+        `_pt=${tokenOf(GRANT)}&_pt=${tokenOf(GRANT)}`,
+      ]) {
+        const res = await post(form, body, { cookie: `__Host-Http-cap=${GRANT}` });
+        expect(res.status, body).toBe(303);
+        expect(res.headers.get("location"), body).toBe(page);
+      }
+      expect(calls).toEqual([]);
+    },
+  );
 
-  test.each(FORMS)("POST %s answers a spent grant with the invalid-link state", async (form, _a, _d, page) => {
-    actionStatus = 404;
-    const res = await post(form, `_pt=${tokenOf(GRANT)}`, { cookie: `__Host-Http-cap=${GRANT}` });
-    expect(res.headers.get("location")).toBe(`${page}?link=invalid`);
-  });
+  test.each(FORMS)(
+    "POST %s answers a spent grant with the invalid-link state",
+    async (form, _a, _d, page) => {
+      actionStatus = 404;
+      const res = await post(form, `_pt=${tokenOf(GRANT)}`, { cookie: `__Host-Http-cap=${GRANT}` });
+      expect(res.headers.get("location")).toBe(`${page}?link=invalid`);
+    },
+  );
 
   test.each(FORMS)("POST %s from a script or another site is refused", async (form) => {
     for (const h of [
       { "sec-fetch-mode": "cors", "sec-fetch-dest": "empty" },
       { origin: "http://evil.example", "sec-fetch-site": "cross-site" },
     ]) {
-      const res = await post(form, `_pt=${tokenOf(GRANT)}`, { cookie: `__Host-Http-cap=${GRANT}`, ...h });
+      const res = await post(form, `_pt=${tokenOf(GRANT)}`, {
+        cookie: `__Host-Http-cap=${GRANT}`,
+        ...h,
+      });
       expect(res.status).toBe(403);
     }
     expect(calls).toEqual([]);
@@ -257,7 +286,10 @@ describe("confirmation, preference and unsubscribe forms use the grant and _pt (
   test.each(["/newsletter/unsubscribe", "/newsletter/resubscribe"])(
     "GET %s changes nothing",
     async (pathname) => {
-      const res = await send(`${FRESH}${pathname}`, { ...NAVIGATE, cookie: `__Host-Http-cap=${GRANT}` });
+      const res = await send(`${FRESH}${pathname}`, {
+        ...NAVIGATE,
+        cookie: `__Host-Http-cap=${GRANT}`,
+      });
       expect(res.status).toBe(404);
       expect(calls).toEqual([]);
     },
@@ -348,7 +380,9 @@ describe("RFC 8058 one-click (C11)", () => {
   test("an unknown or malformed token answers 404", async () => {
     actionStatus = 404;
     expect((await send(ONE_CLICK, machine, { method: "POST", body })).status).toBe(404);
-    expect((await send(`${FRESH}/_p/unsubscribe/xyz`, machine, { method: "POST", body })).status).toBe(404);
+    expect(
+      (await send(`${FRESH}/_p/unsubscribe/xyz`, machine, { method: "POST", body })).status,
+    ).toBe(404);
     expect(apiPaths()).toEqual(["/unsubscribe"]);
   });
 
@@ -366,7 +400,10 @@ describe("signed click-through", () => {
   const click = (q: string) => `${FRESH}/newsletter/click?${q}`;
 
   test("redirects an admitted navigation to the signed target, never revealing the subscriber", async () => {
-    const res = await send(click(`t=${LINK}&u=https%3A%2F%2Fbrand.example%2Fp%2Fkabat&s=good`), NAVIGATE);
+    const res = await send(
+      click(`t=${LINK}&u=https%3A%2F%2Fbrand.example%2Fp%2Fkabat&s=good`),
+      NAVIGATE,
+    );
     expect(res.status).toBe(303);
     expect(res.headers.get("location")).toBe("https://brand.example/p/kabat");
     expect(res.headers.get("referrer-policy")).toBe("strict-origin");
@@ -377,8 +414,14 @@ describe("signed click-through", () => {
   test.each([
     ["a bad signature", `t=${LINK}&u=https%3A%2F%2Fevil.example&s=bad`],
     ["a missing signature", `t=${LINK}&u=https%3A%2F%2Fevil.example`],
-    ["a doubled target", `t=${LINK}&u=https%3A%2F%2Fbrand.example&u=https%3A%2F%2Fevil.example&s=good`],
-    ["an extra parameter", `t=${LINK}&u=https%3A%2F%2Fbrand.example&s=good&next=https%3A%2F%2Fevil.example`],
+    [
+      "a doubled target",
+      `t=${LINK}&u=https%3A%2F%2Fbrand.example&u=https%3A%2F%2Fevil.example&s=good`,
+    ],
+    [
+      "an extra parameter",
+      `t=${LINK}&u=https%3A%2F%2Fbrand.example&s=good&next=https%3A%2F%2Fevil.example`,
+    ],
   ])("%s answers 404 with no Location", async (_what, q) => {
     const res = await send(click(q), NAVIGATE);
     expect(res.status).toBe(404);

@@ -285,7 +285,7 @@ async fn click(
     Ok(no_store(Json(ClickTarget { url }).into_response()))
 }
 
-/// RFC 8058 one-click unsubscribe (decision C11) for a campaign or an abandoned-cart
+/// RFC 8058 one-click unsubscribe for a campaign or an abandoned-cart
 /// reminder: the bearer token alone authorizes it, whatever else the request carries.
 #[utoipa::path(
     post,
@@ -307,9 +307,14 @@ async fn one_click(
     let input: NewsletterToken = parse_json(&body)?;
     with_ctx(&s, &shopper, async |tx, _| {
         let ip = ip_hash(tx, &headers).await?;
-        match campaigns::unsubscribe(tx, &input.token, ip.as_deref()).await {
-            Err(Error::NotFound) if flows::unsubscribe_cart(tx, &input.token).await? => Ok(()),
-            r => r.map(drop),
+        let unsubscribed = match campaigns::unsubscribe(tx, &input.token, ip.as_deref()).await {
+            Err(Error::NotFound) => flows::unsubscribe_cart(tx, &input.token).await?,
+            r => r.map(|_| true)?,
+        };
+        if unsubscribed {
+            Ok(())
+        } else {
+            Err(Error::NotFound)
         }
     })
     .await?;

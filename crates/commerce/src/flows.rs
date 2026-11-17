@@ -959,7 +959,7 @@ async fn unsubscribe_watch_link(tx: &mut TenantTx, link: &[u8]) -> Result<bool, 
     Ok(updated == 1)
 }
 
-/// Same-origin restore (C5): consumes the restore link and revokes its grant, then copies the
+/// Same-origin restore: consumes the restore link and revokes its grant, then copies the
 /// abandoned cart's lines and coupons into a new shop cart and returns that cart's shop
 /// capability. Contact, addresses, notes and customer stay on the abandoned cart.
 pub async fn restore_by_grant(
@@ -980,7 +980,7 @@ pub async fn restore_by_grant(
     .await?
     .ok_or(Error::NotFound)?;
     let (restored, token) = cart::create(tx, ctx).await?;
-    cart::copy_contents(tx, source, restored).await?;
+    cart::copy_lines_and_coupons(tx, source, restored).await?;
     Ok(token)
 }
 

@@ -1480,8 +1480,6 @@ async fn by_link(tx: &mut TenantTx, link: &[u8]) -> Result<Sent, Error> {
     .ok_or(Error::NotFound)
 }
 
-/// The campaign send behind a same-origin preferences grant. The grant stays: the page can
-/// unsubscribe and subscribe again, as the emailed link can.
 async fn by_grant(tx: &mut TenantTx, ctx: &Context, grant: &str) -> Result<Sent, Error> {
     let link = link_access::read_link(tx, ctx, grant, Scope::NewsletterPreferences).await?;
     by_link(tx, &link).await

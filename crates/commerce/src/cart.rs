@@ -196,15 +196,18 @@ pub(crate) async fn snapshot(tx: &mut TenantTx, source: &CartRef) -> Result<Cart
     )
     .fetch_one(&mut **tx)
     .await?;
-    copy_contents(tx, source.id, id).await?;
+    copy_lines_and_coupons(tx, source.id, id).await?;
     Ok(CartRef {
         id,
         market_id: source.market_id,
     })
 }
 
-/// Copies the lines (in order) and coupons of cart `from` into cart `to`, nothing else.
-pub(crate) async fn copy_contents(tx: &mut TenantTx, from: Uuid, to: Uuid) -> Result<(), Error> {
+pub(crate) async fn copy_lines_and_coupons(
+    tx: &mut TenantTx,
+    from: Uuid,
+    to: Uuid,
+) -> Result<(), Error> {
     sqlx::query!(
         "INSERT INTO cart_lines (tenant_id, cart_id, variant_id, quantity, created_at)
          SELECT tenant_id, $2, variant_id, quantity, created_at FROM cart_lines

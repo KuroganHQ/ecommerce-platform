@@ -167,11 +167,14 @@ export const GRANT_FORMS: ReadonlyMap<string, GrantForm> = new Map([
 ]);
 
 export const GRANT_PAGES: ReadonlySet<string> = new Set([
-  ...Object.values(ACTION_LINKS)
-    .filter((a) => !a.clean && a.page !== REVIEW_PAGE)
-    .map((a) => a.page),
+  "/newsletter",
+  "/newsletter/confirm",
+  "/watch/confirm",
+  "/watch/unsubscribe",
   "/watch/unsubscribed",
+  "/flows/unsubscribe",
   "/flows/unsubscribed",
+  RESTORE_PAGE,
 ]);
 
 export const grantCookie = (grant: string) =>

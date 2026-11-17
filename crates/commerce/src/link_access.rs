@@ -260,15 +260,13 @@ async fn revoke(
     .ok_or(Error::NotFound)
 }
 
-/// When the live link behind `hash` expires; links without their own expiry give the grant
-/// [`LINK_HOURS`].
 async fn marketing_link_expiry(
     tx: &mut TenantTx,
     ctx: &Context,
     scope: Scope,
     hash: &[u8],
 ) -> Result<Option<DateTime<Utc>>, Error> {
-    let cap = Utc::now() + Duration::hours(LINK_HOURS);
+    let fallback_expiry = Utc::now() + Duration::hours(LINK_HOURS);
     let found = match scope {
         Scope::NewsletterConfirmation => {
             sqlx::query_scalar!(
@@ -284,7 +282,7 @@ async fn marketing_link_expiry(
             sqlx::query_scalar!(
                 "SELECT $2::timestamptz AS \"at!\" FROM campaign_sends WHERE token_hash = $1",
                 hash,
-                cap
+                fallback_expiry
             )
             .fetch_optional(&mut **tx)
             .await?
@@ -303,7 +301,7 @@ async fn marketing_link_expiry(
                 "SELECT $2::timestamptz AS \"at!\" FROM flow_watches
                  WHERE unsubscribe_hash = $1 AND status <> 'unsubscribed'",
                 hash,
-                cap
+                fallback_expiry
             )
             .fetch_optional(&mut **tx)
             .await?
@@ -313,7 +311,7 @@ async fn marketing_link_expiry(
                 "SELECT $2::timestamptz AS \"at!\" FROM flow_unsubscribe_tokens
                  WHERE token_hash = $1 AND used_at IS NULL",
                 hash,
-                cap
+                fallback_expiry
             )
             .fetch_optional(&mut **tx)
             .await?

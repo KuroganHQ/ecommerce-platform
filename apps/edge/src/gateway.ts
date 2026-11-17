@@ -2183,17 +2183,10 @@ ${
         headers: apiHeaders(site, { [LINK_GRANT_HEADER]: grant }),
       }),
     );
-    if (res.status === 404) {
+    if (!res.ok || action.page !== RESTORE_PAGE) {
       await res.body?.cancel().catch(() => undefined);
-      return seeOther(`${action.page}?link=invalid`);
-    }
-    if (!res.ok) {
-      await res.body?.cancel().catch(() => undefined);
-      return seeOther(`${action.page}?error=1`);
-    }
-    if (action.page !== RESTORE_PAGE) {
-      await res.body?.cancel().catch(() => undefined);
-      return seeOther(action.done);
+      if (res.status === 404) return seeOther(`${action.page}?link=invalid`);
+      return seeOther(res.ok ? action.done : `${action.page}?error=1`);
     }
     const restored = ((await res.json().catch(() => null)) as { cart_token?: unknown } | null)
       ?.cart_token;
@@ -2207,9 +2200,8 @@ ${
   async function newsletterClick(site: SameOriginSite, req: Request, url: URL): Promise<Response> {
     const noStore = { "cache-control": "no-store" };
     if (req.method !== "GET") return text(405, "Method not allowed", { allow: "GET" });
-    const names = [...url.searchParams.keys()];
-    const signed = ["t", "u", "s"];
-    if (names.length !== 3 || !signed.every((k) => url.searchParams.getAll(k).length === 1))
+    const q = url.searchParams;
+    if (q.size !== 3 || !["t", "u", "s"].every((k) => q.getAll(k).length === 1))
       return text(404, "Not found", noStore);
     const res = await upstream(
       new Request(`${opts.apiOrigin}/storefront/v1/newsletter/click${url.search}`, {
