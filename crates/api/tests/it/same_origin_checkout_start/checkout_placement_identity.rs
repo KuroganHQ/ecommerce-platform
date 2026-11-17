@@ -1,4 +1,3 @@
-use commerce::checkout::Placer;
 use commerce::checkout_identity;
 
 use super::checkout_identity::checkout_cart;
@@ -350,13 +349,7 @@ async fn rotation_after_place_post_aborts(db: PgPool) {
                     .unwrap();
             ctx.origin = Some(origin);
             checkout_identity::confirm_placement(
-                &mut tx,
-                &ctx,
-                &settings,
-                &cart,
-                &state,
-                &code,
-                &Placer::default(),
+                &mut tx, &ctx, &settings, &cart, &state, &code, None,
             )
             .await
             .map(|_| ())
@@ -403,7 +396,7 @@ async fn duplicate_callbacks_create_one_order(db: PgPool) {
         &cart,
         &state,
         &code,
-        &Placer::default(),
+        None,
     )
     .await
     .unwrap();
@@ -426,13 +419,7 @@ async fn duplicate_callbacks_create_one_order(db: PgPool) {
                     .unwrap();
             ctx.origin = Some(origin);
             checkout_identity::confirm_placement(
-                &mut tx,
-                &ctx,
-                &settings,
-                &cart,
-                &state,
-                &code,
-                &Placer::default(),
+                &mut tx, &ctx, &settings, &cart, &state, &code, None,
             )
             .await
             .map(|_| ())

@@ -205,11 +205,11 @@ pub struct Confirmed {
 }
 
 /// A2.4 callback: consumes the placement `state` (unused, unexpired, bound to the presented
-/// capability, the exact origin and its current generation and mode) and the account origin's placement
-/// `code` issued for it, and places the order with the input the state was created with, all
-/// in the caller's transaction. The order belongs to the expected account only when the code
-/// vouches for that account; for no account or another one it is a guest order. Anything else
-/// is `404` and places nothing: never a guest fallback.
+/// capability, the exact origin and its current generation and mode) and the account origin's
+/// placement `code` issued for it, and places the order with the input the state was created
+/// with, all in the caller's transaction. The order belongs to the expected account only when
+/// the code vouches for that account; for no account or another one it is a guest order.
+/// Anything else is `404` and places nothing: never a guest fallback.
 pub async fn confirm_placement(
     tx: &mut TenantTx,
     ctx: &Context,
@@ -217,7 +217,7 @@ pub async fn confirm_placement(
     token: &str,
     state: &str,
     code: &str,
-    placer: &Placer<'_>,
+    ip_hash: Option<&[u8]>,
 ) -> Result<Confirmed, Error> {
     if !capability::well_formed(state) {
         return Err(Error::NotFound);
@@ -258,7 +258,7 @@ pub async fn confirm_placement(
         &input,
         &Placer {
             customer_id: (!row.as_guest).then_some(row.expected_customer_id),
-            ip_hash: placer.ip_hash,
+            ip_hash,
         },
     )
     .await?;

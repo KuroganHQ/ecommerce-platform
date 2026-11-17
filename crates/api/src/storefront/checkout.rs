@@ -626,10 +626,6 @@ async fn placement_callback(
     let token = cart_token(&headers)?;
     let confirmed = with_ctx(&s, &shopper, async |tx, ctx| {
         let ip = ip_hash(tx, &headers).await?;
-        let placer = Placer {
-            customer_id: None,
-            ip_hash: ip.as_deref(),
-        };
         let confirmed = checkout_identity::confirm_placement(
             tx,
             ctx,
@@ -637,7 +633,7 @@ async fn placement_callback(
             &token,
             &input.state,
             &input.code,
-            &placer,
+            ip.as_deref(),
         )
         .await?;
         capture_purchase(tx, &headers, confirmed.placement.order_id).await?;
