@@ -480,6 +480,139 @@ async fn every_sort_breaks_ties_alike_in_meilisearch_and_the_postgres_fallback(d
 
 #[sqlx::test(migrations = "../../migrations")]
 #[ignore = "needs Meilisearch: make test-search"]
+async fn explicit_sorts_order_text_matches_by_the_sort_not_by_relevance(db: PgPool) {
+    let s = shop(&db).await;
+    let mut products = Vec::new();
+    for (sku, name, description, price, created, popularity, sales, reviews) in [
+        ("NAME", "Lněné tričko", "", 900, 1000, None, None, 0),
+        (
+            "DESC",
+            "Mikina",
+            "<p>Lněné tričko</p>",
+            100,
+            2000,
+            Some(20),
+            Some(5.0),
+            6,
+        ),
+        (
+            "PARTIAL",
+            "Lněné kalhoty",
+            "",
+            50,
+            3000,
+            Some(50),
+            Some(9.0),
+            6,
+        ),
+    ] {
+        let product = s
+            .product(
+                sku,
+                name,
+                name,
+                &[V {
+                    options: &[("size", "m")],
+                    cz: Some(price),
+                    sk: Some(5),
+                    stock: 5,
+                }],
+            )
+            .await;
+        let mut tx = tenant_tx(&s.runtime, s.tenant).await.unwrap();
+        sqlx::query("UPDATE product_translations SET description_html = $2 WHERE product_id = $1")
+            .bind(product)
+            .bind(description)
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE products SET created_at = $2 WHERE id = $1")
+            .bind(product)
+            .bind(chrono::DateTime::from_timestamp(created, 0).unwrap())
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        if let Some(popularity) = popularity {
+            sqlx::query(
+                "INSERT INTO product_popularity (tenant_id, product_id, popularity) VALUES ($1, $2, $3)",
+            )
+            .bind(s.tenant)
+            .bind(product)
+            .bind(popularity)
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        }
+        if let Some(sales) = sales {
+            sqlx::query(
+                "INSERT INTO product_search_sales (tenant_id, product_id, market_id, sales)
+                 VALUES ($1, $2, $3, $4)",
+            )
+            .bind(s.tenant)
+            .bind(product)
+            .bind(s.cz)
+            .bind(sales)
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        }
+        for _ in 0..reviews {
+            sqlx::query(
+                "INSERT INTO reviews (tenant_id, product_id, customer_name, rating, body, verified,
+                                      locale, status, published_at)
+                 VALUES ($1, $2, 'Jana', 5, 'Super', true, 'cs', 'published', now())",
+            )
+            .bind(s.tenant)
+            .bind(product)
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        }
+        tx.commit().await.unwrap();
+        products.push(product);
+    }
+    for product in &products {
+        assert_eq!(s.index(*product).await, Indexed::Done);
+    }
+    s.settle().await;
+
+    let [name, desc, partial] = products[..] else {
+        unreachable!()
+    };
+    for (sort, expected) in [
+        (Sort::Relevance, [name, desc, partial]),
+        (Sort::Popular, [desc, name, partial]),
+        (Sort::BestSelling, [desc, name, partial]),
+        (Sort::TopRated, [desc, name, partial]),
+        (Sort::PriceAsc, [desc, name, partial]),
+        (Sort::PriceDesc, [name, desc, partial]),
+        (Sort::Newest, [desc, name, partial]),
+    ] {
+        let result = s
+            .search(
+                s.cz,
+                "cs",
+                SearchRequest {
+                    q: "lněné tričko".into(),
+                    sort,
+                    ..req(&[])
+                },
+            )
+            .await;
+        assert_eq!(
+            result
+                .items
+                .iter()
+                .map(|h| h.product_id)
+                .collect::<Vec<_>>(),
+            expected,
+            "{sort:?}"
+        );
+    }
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+#[ignore = "needs Meilisearch: make test-search"]
 async fn best_selling_and_top_rated_put_products_without_the_value_last(db: PgPool) {
     let s = shop(&db).await;
     let mut products = Vec::new();
