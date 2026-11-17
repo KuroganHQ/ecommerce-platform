@@ -29,6 +29,32 @@ test("review links: the checkout reads the invitation, nobody submits through a 
   expect(can(STOREFRONT_OPERATIONS, "GET", "/reviews/invitation")).toBe(false);
 });
 
+test("newsletter link pages read their grant, never act on it through the binding", () => {
+  const can = (method: string, path: string) =>
+    CHECKOUT_OPERATIONS.some((o) => o.method === method && o.path.test(path));
+  for (const path of [
+    "/link-grants/newsletter-confirmation",
+    "/link-grants/newsletter-preferences",
+  ]) {
+    expect(can("GET", path), path).toBe(true);
+    expect(can("POST", path), path).toBe(false);
+  }
+  for (const path of [
+    "/link-grants/newsletter-preferences/unsubscribe",
+    "/link-grants/newsletter-preferences/resubscribe",
+    "/link-grants/watch-confirmation",
+    "/link-grants/watch-unsubscribe",
+    "/link-grants/flow-unsubscribe",
+    "/link-grants/restore-cart",
+  ]) {
+    expect(can("GET", path), path).toBe(false);
+    expect(can("POST", path), path).toBe(false);
+  }
+  expect(
+    STOREFRONT_OPERATIONS.some((o) => o.path.test("/link-grants/newsletter-preferences")),
+  ).toBe(false);
+});
+
 test("account pages read the customer's email preferences, never write them", () => {
   const can = (method: string, path: string) =>
     CHECKOUT_OPERATIONS.some((o) => o.method === method && o.path.test(path));

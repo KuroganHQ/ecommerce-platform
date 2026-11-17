@@ -17,6 +17,15 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, type Page, test } from "@playwright/test";
 import { magicLink, mailpit, root, run, useEnglish } from "../admin/support.ts";
+import {
+  expectGrantPage,
+  FRESH_HTTPS,
+  linkToken,
+  postForm,
+  redirectLocations,
+  securityContext,
+} from "../checkout/support";
+import { tabTo } from "../keyboard";
 import { testContext } from "../rate-client";
 import { CZ, decideConsent, expectAccessible } from "./support.ts";
 
@@ -453,4 +462,98 @@ test("newsletter: double opt-in, personalized campaign, unsubscribe, bounce", as
 
   await shopper.close();
   await staff.close();
+});
+
+test("same-origin newsletter: emailed links become grants, forms post _pt, preferences keep it", async ({
+  browser,
+  request,
+}) => {
+  const email = `so-nl-${run}@example.com`;
+  const status = () => sql(`SELECT status FROM subscribers WHERE email = ${lit(email)}`);
+  const shopper = await securityContext(browser, { viewport: { width: 390, height: 844 } });
+  const page = await shopper.newPage();
+  const redirects = redirectLocations(page);
+
+  await page.goto(`${FRESH_HTTPS}/`);
+  const signup = page.locator("form#newsletter");
+  await signup.getByLabel("E-mail").fill(email);
+  await signup.getByRole("button", { name: "Odebírat" }).click();
+  await expect(page.getByText("Hotovo! Potvrďte prosím odběr v e-mailu.")).toBeVisible();
+  const [mailed] = await mails(email, /^Potvrďte odběr novinek/);
+  const token = /\/newsletter\/confirm\?token=([0-9a-f]{64})/.exec(mailed?.Text ?? "")?.[1] ?? "";
+  expect(token, "emailed confirmation token").toMatch(/^[0-9a-f]{64}$/);
+  const link = `${FRESH_HTTPS}/newsletter/confirm?token=${token}`;
+
+  await page.goto(link);
+  await page.waitForURL(`${FRESH_HTTPS}/newsletter/confirm`);
+  await expect(
+    page.getByText(/Potvrďte, že chcete dostávat novinky na adresu .\*\*\*@example\.com/),
+  ).toBeVisible();
+  const confirm = page.getByRole("button", { name: "Potvrdit odběr" });
+  await expectGrantPage(page, token, redirects, confirm, "same-origin newsletter confirmation");
+  expect(status(), "opening the link confirms nothing").toBe("pending");
+  await tabTo(page, confirm);
+  expect(await postForm(page, "/newsletter/confirm", () => page.keyboard.press("Enter"))).toBe(
+    "/newsletter/confirm?done=1",
+  );
+  await expect(page.getByText("Děkujeme, odběr je potvrzený.")).toBeVisible();
+  expect(status()).toBe("subscribed");
+  await page.goto(link);
+  await page.waitForURL(`${FRESH_HTTPS}/newsletter/confirm?link=invalid`);
+  await expect(page.getByRole("alert")).toContainText("Odkaz už neplatí");
+
+  const footer = linkToken();
+  const later = linkToken();
+  for (const [name, hash] of [
+    [`Footer ${run}`, footer.hash],
+    [`Later ${run}`, later.hash],
+  ] as const)
+    sql(`WITH c AS (
+        INSERT INTO campaigns (tenant_id, name, content, link_key, created_by)
+        SELECT tenant_id, ${lit(name)}, '{}', sha256(gen_random_uuid()::text::bytea), 'e2e'
+        FROM subscribers WHERE email = ${lit(email)} RETURNING id, tenant_id)
+      INSERT INTO campaign_sends (tenant_id, campaign_id, subscriber_id, status, token_hash)
+      SELECT c.tenant_id, c.id, s.id, 'sent', '\\x${hash}'::bytea
+      FROM c JOIN subscribers s ON s.email = ${lit(email)} AND s.tenant_id = c.tenant_id`);
+
+  await page.goto(`${FRESH_HTTPS}/newsletter?t=${footer.token}`);
+  await page.waitForURL(`${FRESH_HTTPS}/newsletter`);
+  await expect(page.getByText(/odebírá naše novinky/)).toBeVisible();
+  const unsubscribe = page.getByRole("button", { name: "Odhlásit odběr" });
+  await expectGrantPage(page, footer.token, redirects, unsubscribe, "same-origin preferences");
+
+  const other = await shopper.newPage();
+  await other.goto(`${FRESH_HTTPS}/newsletter?t=${later.token}`);
+  await other.waitForURL(`${FRESH_HTTPS}/newsletter`);
+  await other.close();
+  expect(
+    await postForm(page, "/newsletter/unsubscribe", () => unsubscribe.click()),
+    "a stale _pt reloads the page",
+  ).toBe("/newsletter");
+  expect(status(), "the stale form acted on nothing").toBe("subscribed");
+
+  await tabTo(page, unsubscribe);
+  expect(await postForm(page, "/newsletter/unsubscribe", () => page.keyboard.press("Enter"))).toBe(
+    "/newsletter?done=unsubscribed",
+  );
+  await expect(page.getByText("Odběr je zrušený.", { exact: false })).toBeVisible();
+  expect(status()).toBe("unsubscribed");
+
+  const resubscribe = page.getByRole("button", { name: "Znovu odebírat" });
+  await expectGrantPage(page, later.token, redirects, resubscribe, "same-origin resubscribe");
+  expect(await postForm(page, "/newsletter/resubscribe", () => resubscribe.click())).toBe(
+    "/newsletter?done=resubscribed",
+  );
+  await expect(page.getByText("Poslali jsme vám e-mail", { exact: false })).toBeVisible();
+  expect(status(), "resubscribing starts a new double opt-in").toBe("pending");
+  await mails(email, /^Potvrďte odběr novinek/, 2);
+
+  const oneClick = await request.post(`${FRESH_HTTPS}/_p/unsubscribe/${later.token}`, {
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    data: "List-Unsubscribe=One-Click",
+    ignoreHTTPSErrors: true,
+  });
+  expect(oneClick.status(), "RFC 8058 one-click on the same-origin shop").toBe(200);
+  expect(status()).toBe("unsubscribed");
+  await shopper.close();
 });

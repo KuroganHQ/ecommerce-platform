@@ -4,6 +4,7 @@
  * order, the fake gateway and the order model.
  */
 
+import { createHash, randomBytes } from "node:crypto";
 import {
   type Browser,
   type BrowserContext,
@@ -13,7 +14,7 @@ import {
   type Page,
   type Request,
 } from "@playwright/test";
-import { mailpit } from "../admin/support";
+import { expectAccessible, mailpit } from "../admin/support";
 import { tabTo } from "../keyboard";
 import { rateHeaders, testContext, testRateHeaders } from "../rate-client";
 
@@ -397,3 +398,62 @@ export const themeRequests = (page: Page, requests: [string, string][]) =>
       ),
     requests,
   );
+
+/** Every `Location` the page's responses carry, to show no redirect echoes an emailed link. */
+export function redirectLocations(page: Page): string[] {
+  const seen: string[] = [];
+  page.on("response", (r) => {
+    const location = r.headers().location;
+    if (location) seen.push(location);
+  });
+  return seen;
+}
+
+/** A link page on a grant: one `_pt`, no bearer field, the link nowhere a script or log sees it. */
+export async function expectGrantPage(
+  page: Page,
+  token: string,
+  redirects: string[],
+  action: Locator,
+  name: string,
+) {
+  await expect(page.locator('input[name="_pt"]')).toHaveCount(1);
+  await expect(page.locator('input[name="token"], input[name="t"]')).toHaveCount(0);
+  const traces = await historyTraces(page);
+  for (const trace of [...traces.entries, traces.referrer, traces.html, ...redirects])
+    expect(trace, "no emailed link in history, referrer, HTML or redirects").not.toContain(token);
+  for (const width of [390, 1280]) {
+    await page.setViewportSize({ width, height: 844 });
+    await expect(action, `${name} at ${width}px`).toBeInViewport();
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      `${name} has no sideways scroll at ${width}px`,
+    ).toBe(true);
+  }
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expectAccessible(page, name);
+}
+
+/** Submits a navigation form and returns the 303 `Location` once the next page commits. */
+export async function postForm(
+  page: Page,
+  path: string,
+  submit: () => Promise<void>,
+): Promise<string> {
+  const posted = page.waitForResponse(
+    (r) => r.request().method() === "POST" && new URL(r.url()).pathname === path,
+  );
+  const committed = page.waitForEvent("framenavigated", (frame) => frame === page.mainFrame());
+  await submit();
+  const res = await posted;
+  expect(res.status(), `POST ${path}`).toBe(303);
+  await committed;
+  await page.waitForLoadState("load");
+  return res.headers().location ?? "";
+}
+
+/** A fresh emailed-link token and the SHA-256 the database stores for it. */
+export function linkToken(): { token: string; hash: string } {
+  const token = randomBytes(32).toString("hex");
+  return { token, hash: createHash("sha256").update(token).digest("hex") };
+}
