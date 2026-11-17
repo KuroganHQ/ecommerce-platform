@@ -3,6 +3,7 @@ import { recommendations } from "@platform/storefront-sdk/recommendations";
 import type { ProductCard } from "@platform/storefront-sdk/types";
 import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import MiniCard from "../lib/MiniCard";
+import Swatches from "../lib/Swatches";
 
 export type Props = {
   title: string;
@@ -44,13 +45,9 @@ export default function ForYouList(props: Props) {
           <For each={items()}>
             {(p) => (
               <li>
-                <MiniCard
-                  product={p}
-                  base={props.base}
-                  labels={props.labels}
-                  sizes={props.sizes}
-                  swatches
-                />
+                <MiniCard product={p} base={props.base} labels={props.labels} sizes={props.sizes}>
+                  <Swatches swatches={p.swatches} labels={props.labels} />
+                </MiniCard>
               </li>
             )}
           </For>
