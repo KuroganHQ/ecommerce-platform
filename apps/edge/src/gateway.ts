@@ -2108,6 +2108,41 @@ ${
     return new Response(req.method === "HEAD" ? null : r.body, { status: r.status, headers });
   }
 
+  async function accountCode(
+    site: Site,
+    req: Request,
+    url: URL,
+    purpose: "identify" | "placement",
+  ) {
+    if (req.method !== "GET") return text(405, "Method not allowed", { allow: "GET" });
+    const state = url.searchParams.get("state") ?? "";
+    const origin = url.searchParams.get("origin") ?? "";
+    const session = capabilityCookie(req, SESSION_COOKIE);
+    const res = await upstream(
+      new Request(`${opts.apiOrigin}/storefront/v1/customer/account-codes`, {
+        method: "POST",
+        headers: apiHeaders(site, {
+          "content-type": "application/json",
+          ...(session ? { "x-customer-session": session } : {}),
+        }),
+        body: JSON.stringify({ purpose, state, origin }),
+      }),
+    );
+    const seeOther = (location: string) =>
+      new Response(null, {
+        status: 303,
+        headers: { location, "cache-control": "no-store", "referrer-policy": "no-referrer" },
+      });
+    if (res.status === 401 && purpose === "identify") {
+      const next = `${url.pathname}?${new URLSearchParams({ state, origin })}`;
+      return seeOther(`/account?${new URLSearchParams({ next })}`);
+    }
+    if (res.status === 400) return text(400, "Bad request");
+    if (res.status !== 201) return text(502, "Bad gateway");
+    const { code } = (await res.json()) as { code: string };
+    return seeOther(`${origin}/checkout/${purpose}?${new URLSearchParams({ state, code })}`);
+  }
+
   async function account(
     site: Site,
     req: Request,
@@ -2126,6 +2161,8 @@ ${
         status: 303,
         headers: { location: "/account", "cache-control": "no-store" },
       });
+    if (p === "/identify" || p === "/placement")
+      return accountCode(site, req, url, p === "/identify" ? "identify" : "placement");
     if (!ACCOUNT_PAGE_RE.test(p)) return text(404, "Not found");
     if (req.method !== "GET" && req.method !== "HEAD")
       return text(405, "Method not allowed", { allow: "GET, HEAD" });

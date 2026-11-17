@@ -35,6 +35,7 @@ const FETCH: i64 = 1000;
 
 /// Tables holding live credentials or rate-limit bookkeeping only: never exported.
 pub const SKIPPED_TABLES: &[&str] = &[
+    "account_codes",
     "checkout_handoffs",
     "customer_auth_attempts",
     "customer_magic_links",

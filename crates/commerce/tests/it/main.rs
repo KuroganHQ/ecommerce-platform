@@ -1,5 +1,6 @@
 #![allow(clippy::unwrap_used)]
 
+mod account_codes;
 mod adtracking;
 mod ai;
 mod alt_texts;

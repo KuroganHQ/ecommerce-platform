@@ -238,6 +238,14 @@ export function fakeApi() {
       return req.headers.get("x-customer-session") === "sessiontoken_000000000001"
         ? Response.json({ email: "jana@example.cz", session_seen: true })
         : Response.json({ code: "not_signed_in" }, { status: 401 });
+    if (p === "/customer/account-codes") {
+      const b = JSON.parse(calls.at(-1)?.body || "{}") as { purpose?: string; origin?: string };
+      if (b.origin !== "http://so.localhost:8280")
+        return Response.json({ code: "invalid_callback" }, { status: 400 });
+      if (b.purpose === "identify" && !req.headers.get("x-customer-session"))
+        return Response.json({ code: "not_signed_in" }, { status: 401 });
+      return Response.json({ code: "c".repeat(64) }, { status: 201 });
+    }
     if (p === "/customer/logout")
       return new Response(null, { status: 204, headers: { "x-session-clear": "1" } });
     if (p === "/consent")

@@ -1,0 +1,32 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE account_codes SET consumed_at = now()\n         WHERE tenant_id = $1 AND code_hash = $2 AND purpose = $3 AND state_hash = $4\n           AND callback_origin = $5 AND expires_at > now() AND consumed_at IS NULL\n         RETURNING customer_id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "customer_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "account_codes",
+            "name": "customer_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Bytea",
+        "Text",
+        "Bytea",
+        "Text"
+      ]
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "93b7bfb2a79aa53237b980998d53bbc782c6747ecb74ddf9bea1bb351a7b9c1d"
+}

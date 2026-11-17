@@ -4,6 +4,7 @@
 //! Tenant-scoped functions take `&mut platform::db::TenantTx`, so they cannot run outside a
 //! tenant transaction (spec A8).
 
+pub mod account_codes;
 pub mod adtracking;
 pub mod ai;
 pub mod analytics;

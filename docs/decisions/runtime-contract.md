@@ -191,7 +191,7 @@ cart capability is injected from the `__Host-cart` cookie by the edge, never exp
 | `<shop>` anything else (GET/HEAD only, else 405) | theme worker |
 | `checkout.<shop>/start?h=` | handoff exchange |
 | `checkout.<shop>/_p/tokens.css` | tenant tokens as CSS (A6) |
-| `<account origin>` (`<label>.<ACCOUNT_DOMAIN>`) | customer accounts: pages and `/_p/account/*` → `/storefront/v1/customer/*` (§13) |
+| `<account origin>` (`<label>.<ACCOUNT_DOMAIN>`) | customer accounts: pages, `/_p/account/*` → `/storefront/v1/customer/*`, A2 `/identify` and `/placement` (§13) |
 | `checkout.<shop>` assets / everything else | checkout artifact / checkout worker (always `no-store`) |
 | `preview-<n>--<shop>` | the previewed revision (WP23, §14): token → cookie, `no-store`, `noindex` |
 | internal port 8788: `/_edge/purge`, `/_edge/healthz` | bearer `EDGE_PURGE_TOKEN` (constant-time compare, ≥ 16 chars); not routed by Caddy |
@@ -449,6 +449,15 @@ separate cache namespace, never cached (already bypassed by the policy).
   request's scheme and port, and the matched path, never from the raw request path. Any other
   `/account*` path and every `/_p/account/*` path there is a 404.
 - `/account/verify` is served with `Referrer-Policy: no-referrer`.
+- A2 account half (`same-origin-checkout.md`): `GET <account origin>/identify` and
+  `/placement` take `state` and `origin` and ask `POST /storefront/v1/customer/account-codes`
+  for a code. The API answers `400` unless `origin` is exactly a same-origin checkout origin of
+  the market, and the edge then answers `400` with no redirect. Otherwise the edge answers
+  `303`, `no-store`, to `<origin>/checkout/identify` or `/checkout/placement` with `state` and
+  `code`. Signed out, `/identify` answers `303` to `/account?next=<this request>` instead;
+  `/placement` never asks for sign-in and its code reports no account. Codes are single use,
+  valid 60 s, stored as SHA-256 and consumed by `account_codes::consume` in the checkout's
+  transaction.
 
 ## 14. WP23: tenant themes, the builder and previews
 
