@@ -8,10 +8,6 @@ import { problemText } from "./SignIn";
 
 type Purpose = keyof ConsentPurposes;
 
-/**
- * Consent preferences (A20): posted to `endpoint`, `/_p/consent` on the checkout origin (cookie
- * purposes only, C9) or `/_p/account/consent` (email purposes only) on the account origin.
- */
 export default function ConsentForm(props: {
   m: Record<string, string>;
   purposes: ConsentPurposes;

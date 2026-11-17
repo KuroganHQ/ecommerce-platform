@@ -847,7 +847,9 @@ async fn theme_consent_never_changes_customer_preferences(db: PgPool) {
     ] {
         for source in ["banner", "preferences", "linked", "checkout", "account"] {
             let (status, body, _) = c
-                .call(theme(json!({"purposes": purposes, "text_version": "2026-09-25", "source": source})))
+                .call(theme(
+                    json!({"purposes": purposes, "text_version": "2026-09-25", "source": source}),
+                ))
                 .await;
             assert_eq!(
                 status,
@@ -856,9 +858,17 @@ async fn theme_consent_never_changes_customer_preferences(db: PgPool) {
             );
         }
     }
-    for source in ["preferences", "linked", "checkout", "account", "double_opt_in"] {
+    for source in [
+        "preferences",
+        "linked",
+        "checkout",
+        "account",
+        "double_opt_in",
+    ] {
         let (status, state, res) = c
-            .call(theme(json!({"purposes": {"ads": true}, "text_version": "2026-09-25", "source": source})))
+            .call(theme(
+                json!({"purposes": {"ads": true}, "text_version": "2026-09-25", "source": source}),
+            ))
             .await;
         assert_eq!(status, StatusCode::OK, "{source}: {state}");
         assert_eq!(res.headers()["x-consent-summary"], "analytics,ads");
@@ -874,8 +884,11 @@ async fn theme_consent_never_changes_customer_preferences(db: PgPool) {
         )
         .await;
     assert_eq!(status, StatusCode::CREATED, "{body}");
-    c.sign_in("pat@example.test", &[("x-consent-subject", subject.clone())])
-        .await;
+    c.sign_in(
+        "pat@example.test",
+        &[("x-consent-subject", subject.clone())],
+    )
+    .await;
 
     assert_eq!(customer_records().await, before);
     let (_, account, _) = c

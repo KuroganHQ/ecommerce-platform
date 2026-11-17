@@ -158,10 +158,6 @@ pub struct CookieChoice {
     pub text_version: String,
 }
 
-/// The source of every choice made through the theme-callable `/_p/consent`: a theme can call
-/// it from any page, so the banner and the preferences page cannot be told apart.
-pub const BROWSER_SOURCE: &str = "browser";
-
 /// Where a choice was made.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
@@ -248,8 +244,6 @@ pub async fn record(
     .await
 }
 
-/// A browser's cookie choice through `/_p/consent` (C9): the anonymous subject only, never a
-/// customer, under [`BROWSER_SOURCE`].
 pub async fn record_anonymous(
     tx: &mut TenantTx,
     anon: &str,
@@ -278,15 +272,13 @@ pub async fn record_anonymous(
         &Subject::Anon(anon.to_owned()),
         &choices,
         &choice.text_version,
-        BROWSER_SOURCE,
+        "browser",
         ip_hash,
     )
     .await
 }
 
-/// The cookie categories of an anonymous subject (`GET /_p/consent`). Email purposes recorded
-/// for it before C9 are not the browser's and are left out.
-pub async fn anonymous_state(tx: &mut TenantTx, anon: &str) -> Result<ConsentState, Error> {
+pub async fn cookie_state(tx: &mut TenantTx, anon: &str) -> Result<ConsentState, Error> {
     let all = state(tx, &Subject::Anon(anon.to_owned())).await?;
     Ok(ConsentState {
         purposes: Purposes {

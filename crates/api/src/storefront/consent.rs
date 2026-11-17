@@ -1,10 +1,3 @@
-//! Consent (A20, C9): `/_p/consent` on the shop and checkout origins lands here through the
-//! edge. Themes can call it, so it handles the browser's cookie categories only and never a
-//! customer: no session is read. The anonymous subject id travels in `X-Consent-Subject` (the
-//! edge's consent cookie); a new one is minted on the first choice and returned in the same
-//! header, together with `X-Consent-Summary` for the script-readable cookie (see
-//! `docs/decisions/consent-contract.md`).
-
 use axum::Json;
 use axum::body::Bytes;
 use axum::extract::State;
@@ -66,7 +59,7 @@ async fn get_consent(
 ) -> Result<Response, Error> {
     let anon = anon(&headers);
     let state = with_ctx(&s, &shopper, async |tx, _| match anon {
-        Some(a) => consent::anonymous_state(tx, &a).await,
+        Some(a) => consent::cookie_state(tx, &a).await,
         None => Ok(ConsentState {
             purposes: Purposes::default(),
             text_version: None,
@@ -106,7 +99,7 @@ async fn post_consent(
         let ip = ip_hash(tx, &headers).await?;
         consent::record_anonymous(tx, &subject, &choice, ip.as_deref()).await?;
         Ok((
-            consent::anonymous_state(tx, &subject).await?,
+            consent::cookie_state(tx, &subject).await?,
             consent::analytics_covers_experiments(tx, &Subject::Anon(subject.clone())).await?,
         ))
     })

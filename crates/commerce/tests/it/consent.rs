@@ -1,5 +1,3 @@
-//! Theme-callable consent (C9): anonymous cookie categories only, under a server-owned source.
-
 use commerce::consent::{self, ConsentChoice, CookieChoice, Purposes, Source, Subject};
 use platform::db::tenant_tx;
 use sqlx::PgPool;
@@ -54,7 +52,7 @@ async fn anonymous_choices_carry_the_server_source_and_show_cookie_categories_on
         .await
         .unwrap();
 
-    let state = consent::anonymous_state(&mut tx, &anon).await.unwrap();
+    let state = consent::cookie_state(&mut tx, &anon).await.unwrap();
     assert_eq!(
         state.purposes,
         Purposes {
