@@ -7,6 +7,7 @@ CREATE TABLE checkout_placements (
     capability_hash      bytea NOT NULL CHECK (length(capability_hash) = 32),
     origin               text NOT NULL CHECK (length(origin) <= 300),
     generation           bigint NOT NULL CHECK (generation >= 0),
+    mode                 text NOT NULL CHECK (mode IN ('isolated', 'same_origin')),
     expected_customer_id uuid NOT NULL,
     input                jsonb NOT NULL,
     expires_at           timestamptz NOT NULL,

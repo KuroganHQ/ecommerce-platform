@@ -543,3 +543,76 @@ async fn the_note_is_the_one_reviewed_when_the_state_was_created(db: PgPool) {
     let k = k.expect("the note replaced the capability (C6)");
     assert!(commerce::capability::well_formed(&k) && k != cart);
 }
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn changed_mode_without_a_generation_bump_aborts(db: PgPool) {
+    let c = setup(db, CheckoutMode::SameOrigin).await;
+    let method = c.placeable().await;
+    let (ana, _) = c.signed_in("ana@example.cz").await;
+    let (cart, view) = c.linked(method, &ana).await;
+    let state = c.placement_state(&cart, "mode-only", &view, "").await;
+    let code = c.placement_code(Some(&ana), &state).await;
+    let generation = async || -> i64 {
+        sqlx::query_scalar("SELECT generation FROM platform.checkout_fences WHERE tenant_id = $1")
+            .bind(c.shop.tenant)
+            .fetch_one(&c.db)
+            .await
+            .unwrap()
+    };
+    let before = generation().await;
+
+    sqlx::query(
+        "ALTER TABLE platform.checkout_origins DISABLE TRIGGER checkout_policy_mode_updated",
+    )
+    .execute(&c.db)
+    .await
+    .unwrap();
+    sqlx::query("UPDATE platform.checkout_origins SET mode = 'isolated' WHERE origin = $1")
+        .bind(c.shop.origin.as_str())
+        .execute(&c.db)
+        .await
+        .unwrap();
+    sqlx::query(
+        "ALTER TABLE platform.checkout_origins ENABLE TRIGGER checkout_policy_mode_updated",
+    )
+    .execute(&c.db)
+    .await
+    .unwrap();
+    assert_eq!(
+        generation().await,
+        before,
+        "the mode moved, the generation did not"
+    );
+
+    c.assert_aborted(
+        &c.edge,
+        &cart,
+        json!({ "state": state, "code": code }),
+        "the mode changed under the state",
+    )
+    .await;
+    assert_eq!(c.unconsumed_placement().await, (1, 1));
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn changed_version_aborts(db: PgPool) {
+    let c = setup(db, CheckoutMode::SameOrigin).await;
+    let method = c.placeable().await;
+    let (ana, _) = c.signed_in("ana@example.cz").await;
+    let (cart, view) = c.linked(method, &ana).await;
+    let state = c.placement_state(&cart, "version", &view, "").await;
+    let code = c.placement_code(Some(&ana), &state).await;
+
+    let changed = c.ready(&cart, method).await;
+    assert_ne!(
+        changed["cart"]["version"], view["cart"]["version"],
+        "a non-PII write moved the version without a rotation"
+    );
+    let (status, text, _) = c
+        .confirm_as(&c.edge, &cart, json!({ "state": state, "code": code }))
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{text}");
+    assert_eq!(super::code(&text), "cart_changed");
+    assert_eq!(c.orders().await, 0);
+    assert_eq!(c.unconsumed_placement().await, (1, 1));
+}

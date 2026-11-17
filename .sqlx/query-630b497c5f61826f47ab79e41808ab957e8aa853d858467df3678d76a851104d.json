@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "UPDATE checkout_placements\n           SET consumed_at = now(), as_guest = expected_customer_id IS DISTINCT FROM $6\n           WHERE state_hash = $1 AND cart_id = $2 AND capability_hash = $3\n             AND origin = $4 AND generation = $5\n             AND consumed_at IS NULL AND expires_at > now()\n           RETURNING expected_customer_id, input, as_guest AS \"as_guest!\"",
+  "query": "UPDATE checkout_placements\n           SET consumed_at = now(), as_guest = expected_customer_id IS DISTINCT FROM $6\n           WHERE state_hash = $1 AND cart_id = $2 AND capability_hash = $3\n             AND origin = $4 AND generation = $5 AND mode = $7\n             AND consumed_at IS NULL AND expires_at > now()\n           RETURNING expected_customer_id, input, as_guest AS \"as_guest!\"",
   "describe": {
     "columns": [
       {
@@ -44,7 +44,8 @@
         "Bytea",
         "Text",
         "Int8",
-        "Uuid"
+        "Uuid",
+        "Text"
       ]
     },
     "nullable": [
@@ -53,5 +54,5 @@
       true
     ]
   },
-  "hash": "4a0b481e719f91367b1c511490ba5bc5d2f2d76de0ea5217c19cf831d851eed2"
+  "hash": "630b497c5f61826f47ab79e41808ab957e8aa853d858467df3678d76a851104d"
 }

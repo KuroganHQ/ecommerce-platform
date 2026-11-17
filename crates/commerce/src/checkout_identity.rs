@@ -127,9 +127,9 @@ pub enum Placing {
 
 /// Places the order as [`checkout::place_order`] does, except for an open same-origin checkout
 /// that identify linked to an account. That one gets a fresh single-use placement `state`
-/// instead, valid 5 minutes and bound to the checkout's capability, exact origin and its
-/// generation (which every mode switch moves), the linked (expected) account and the reviewed
-/// `input`, notes and cart version included. The order waits for [`confirm_placement`].
+/// instead, valid 5 minutes and bound to the checkout's capability, exact origin, its
+/// generation and mode, the linked (expected) account and the reviewed `input`, notes and cart
+/// version included. The order waits for [`confirm_placement`].
 /// Revokes the checkout's earlier unconsumed placement states.
 #[allow(clippy::too_many_arguments)]
 pub async fn place(
@@ -178,15 +178,16 @@ async fn placement_state(
     let state = capability::mint();
     sqlx::query!(
         "INSERT INTO checkout_placements
-             (state_hash, tenant_id, cart_id, capability_hash, origin, generation,
+             (state_hash, tenant_id, cart_id, capability_hash, origin, generation, mode,
               expected_customer_id, input, expires_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now() + make_interval(secs => $9))",
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now() + make_interval(secs => $10))",
         state.hash,
         tx.tenant_id(),
         c.id,
         capability::hash(token),
         p.origin,
         p.generation,
+        p.mode.as_str(),
         expected,
         serde_json::to_value(input).map_err(|e| Error::Internal(e.to_string()))?,
         PLACEMENT_TTL_SECS
@@ -204,7 +205,7 @@ pub struct Confirmed {
 }
 
 /// A2.4 callback: consumes the placement `state` (unused, unexpired, bound to the presented
-/// capability, the exact origin and its current generation) and the account origin's placement
+/// capability, the exact origin and its current generation and mode) and the account origin's placement
 /// `code` issued for it, and places the order with the input the state was created with, all
 /// in the caller's transaction. The order belongs to the expected account only when the code
 /// vouches for that account; for no account or another one it is a guest order. Anything else
@@ -230,7 +231,7 @@ pub async fn confirm_placement(
         r#"UPDATE checkout_placements
            SET consumed_at = now(), as_guest = expected_customer_id IS DISTINCT FROM $6
            WHERE state_hash = $1 AND cart_id = $2 AND capability_hash = $3
-             AND origin = $4 AND generation = $5
+             AND origin = $4 AND generation = $5 AND mode = $7
              AND consumed_at IS NULL AND expires_at > now()
            RETURNING expected_customer_id, input, as_guest AS "as_guest!""#,
         capability::hash(state),
@@ -238,7 +239,8 @@ pub async fn confirm_placement(
         capability::hash(token),
         p.origin,
         p.generation,
-        evidence.customer_id
+        evidence.customer_id,
+        p.mode.as_str()
     )
     .fetch_optional(&mut **tx)
     .await?
