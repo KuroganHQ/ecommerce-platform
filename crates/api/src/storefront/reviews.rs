@@ -64,6 +64,14 @@ pub struct ReviewSubmitted {
     pub status: String,
 }
 
+impl ReviewSubmitted {
+    pub(super) fn pending() -> Self {
+        Self {
+            status: "pending".into(),
+        }
+    }
+}
+
 /// Submits a review with a review link's token (single use). Plain text only; the review
 /// waits for moderation.
 #[utoipa::path(
@@ -92,12 +100,6 @@ async fn submit(
     })
     .await?;
     Ok(no_store(
-        (
-            StatusCode::CREATED,
-            Json(ReviewSubmitted {
-                status: "pending".into(),
-            }),
-        )
-            .into_response(),
+        (StatusCode::CREATED, Json(ReviewSubmitted::pending())).into_response(),
     ))
 }

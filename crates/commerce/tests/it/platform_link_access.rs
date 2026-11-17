@@ -2,10 +2,14 @@ use commerce::capability;
 use commerce::checkout_access::{self, ShopOrigin};
 use commerce::link_access::{self, Scope, Source};
 use commerce::order_access::{self, Access, Credentials};
+use commerce::invoicing::document::RefundLine;
 use commerce::orders;
+use commerce::reviews::{self, ReviewText};
+use commerce::storefront::Context;
 use commerce::tenancy::CheckoutMode;
+use commerce::withdrawals::{self, DeclareInput};
 use platform::Error;
-use platform::db::tenant_tx;
+use platform::db::{TenantTx, tenant_tx};
 use sqlx::PgPool;
 use testkit::storefront::{Shop, shop};
 use tokio::sync::oneshot;
@@ -30,14 +34,14 @@ impl At {
 
     async fn authorize(&self, runtime: &PgPool, grant: &str, scope: Scope) -> Result<(), Error> {
         self.run(runtime, async |tx, ctx| {
-            link_access::authorize(tx, ctx, grant, scope).await
+            link_access::authorize(tx, ctx, grant, scope).await.map(|_| ())
         })
         .await
     }
 
     async fn complete(&self, runtime: &PgPool, grant: &str, scope: Scope) -> Result<(), Error> {
         self.run(runtime, async |tx, ctx| {
-            link_access::complete(tx, ctx, grant, scope).await
+            link_access::complete(tx, ctx, grant, scope).await.map(|_| ())
         })
         .await
     }
@@ -666,4 +670,313 @@ async fn orders_token(runtime: &PgPool, shop: &Shop, order: Uuid) -> String {
     let token = orders::issue_token(&mut tx, order).await.unwrap();
     tx.commit().await.unwrap();
     token
+}
+
+impl At {
+    async fn atomic<T>(
+        &self,
+        runtime: &PgPool,
+        f: impl AsyncFnOnce(&mut TenantTx, &Context) -> Result<T, Error>,
+    ) -> Result<T, Error> {
+        let (mut tx, ctx) = self.tx(runtime).await;
+        let out = f(&mut tx, &ctx).await;
+        if out.is_ok() {
+            tx.commit().await.unwrap();
+        } else {
+            tx.rollback().await.unwrap();
+        }
+        out
+    }
+}
+
+async fn shipped_withdrawal_link(runtime: &PgPool, shop: &Shop) -> (Uuid, String) {
+    let order =
+        testkit::storefront::raw_order(runtime, shop, shop.cz, "CZK", 10_000, 2, "shipped").await;
+    let minted = capability::mint();
+    let mut tx = tenant_tx(runtime, shop.tenant).await.unwrap();
+    sqlx::query(
+        "INSERT INTO withdrawal_tokens (token_hash, tenant_id, order_id, expires_at)
+         VALUES ($1, $2, $3, now() + interval '24 hours')",
+    )
+    .bind(&minted.hash)
+    .bind(shop.tenant)
+    .bind(order)
+    .execute(&mut *tx)
+    .await
+    .unwrap();
+    tx.commit().await.unwrap();
+    (order, minted.token)
+}
+
+async fn review_link(runtime: &PgPool, shop: &Shop) -> (Uuid, String) {
+    let order =
+        testkit::storefront::raw_order(runtime, shop, shop.cz, "CZK", 10_000, 1, "delivered")
+            .await;
+    let mut tx = tenant_tx(runtime, shop.tenant).await.unwrap();
+    let issued = reviews::issue_tokens(&mut tx, order, chrono::Utc::now())
+        .await
+        .unwrap();
+    tx.commit().await.unwrap();
+    (issued[0].order_line_id, issued[0].token.clone())
+}
+
+async fn scalar<T>(runtime: &PgPool, tenant: Uuid, sql: &'static str, id: Uuid) -> T
+where
+    T: for<'r> sqlx::Decode<'r, sqlx::Postgres> + sqlx::Type<sqlx::Postgres> + Send + Unpin,
+{
+    let mut tx = tenant_tx(runtime, tenant).await.unwrap();
+    let v = sqlx::query_scalar(sql)
+        .bind(id)
+        .fetch_one(&mut *tx)
+        .await
+        .unwrap();
+    tx.commit().await.unwrap();
+    v
+}
+
+fn text(rating: i16) -> ReviewText {
+    ReviewText {
+        rating,
+        name: "Jana N.".into(),
+        title: String::new(),
+        body: "Sedí přesně.".into(),
+    }
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn withdrawal_grant_cannot_read_order(db: PgPool) {
+    let runtime = testkit::runtime_pool(&db, 2).await;
+    let (shop, at) = same_origin(&runtime, "lgwithdraw").await;
+    let (order, link) = shipped_withdrawal_link(&runtime, &shop).await;
+    let (_, order_link) = self::order(&runtime, &shop).await;
+
+    let (grant, scope) = at
+        .exchange(&runtime, Source::WithdrawalLink(&link), None)
+        .await
+        .expect("a withdrawal link exchanges for a grant");
+    assert_eq!(scope, Scope::Withdrawal);
+    for other in [Scope::OrderRead(order), Scope::WithdrawalRequest, Scope::Review] {
+        assert!(
+            not_found(&at.authorize(&runtime, &grant, other).await),
+            "a withdrawal grant does not allow {other:?}"
+        );
+    }
+    for _ in 0..2 {
+        let form = at
+            .run(&runtime, async |tx, ctx| {
+                withdrawals::form_by_grant(tx, ctx, &grant).await
+            })
+            .await
+            .expect("the grant reads its withdrawal form, and reading consumes nothing");
+        assert_eq!(form.lines.len(), 1);
+    }
+
+    let (reader, _) = at
+        .exchange(&runtime, Source::OrderLink(&order_link), None)
+        .await
+        .unwrap();
+    let (anonymous, _) = at
+        .exchange(&runtime, Source::WithdrawalForm, None)
+        .await
+        .unwrap();
+    for other in [&reader, &anonymous, &link] {
+        assert!(
+            not_found(
+                &at.run(&runtime, async |tx, ctx| {
+                    withdrawals::form_by_grant(tx, ctx, other).await
+                })
+                .await
+            ),
+            "only a withdrawal grant reads a withdrawal form"
+        );
+    }
+
+    at.run(&runtime, async |tx, _| {
+        withdrawals::consume_token(tx, &link).await
+    })
+    .await
+    .unwrap();
+    assert!(
+        not_found(
+            &at.run(&runtime, async |tx, ctx| {
+                withdrawals::form_by_grant(tx, ctx, &grant).await
+            })
+            .await
+        ),
+        "a used link ends its grant"
+    );
+    assert!(
+        not_found(
+            &at.exchange(&runtime, Source::WithdrawalLink(&link), None)
+                .await
+        ),
+        "a used link exchanges to nothing"
+    );
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn review_grant_cannot_submit_other_line(db: PgPool) {
+    let runtime = testkit::runtime_pool(&db, 2).await;
+    let (shop, at) = same_origin(&runtime, "lgreview").await;
+    let (line_a, link_a) = review_link(&runtime, &shop).await;
+    let (line_b, link_b) = review_link(&runtime, &shop).await;
+
+    let (grant, scope) = at
+        .exchange(&runtime, Source::ReviewLink(&link_a), None)
+        .await
+        .expect("a review link exchanges for a grant");
+    assert_eq!(scope, Scope::Review);
+    for other in [Scope::Withdrawal, Scope::WithdrawalRequest] {
+        assert!(not_found(&at.authorize(&runtime, &grant, other).await));
+    }
+    at.run(&runtime, async |tx, ctx| {
+        reviews::invitation_by_grant(tx, ctx, &grant).await
+    })
+    .await
+    .expect("the grant reads its invitation");
+
+    let review = at
+        .atomic(&runtime, async |tx, ctx| {
+            reviews::submit_by_grant(tx, ctx, &grant, &text(5), None).await
+        })
+        .await
+        .unwrap();
+    let reviewed: Uuid = scalar(
+        &runtime,
+        shop.tenant,
+        "SELECT order_line_id FROM reviews WHERE id = $1",
+        review,
+    )
+    .await;
+    assert_eq!(reviewed, line_a, "the review lands on the grant's own line");
+    assert_ne!(line_a, line_b);
+    assert!(
+        not_found(
+            &at.atomic(&runtime, async |tx, ctx| {
+                reviews::submit_by_grant(tx, ctx, &grant, &text(4), None).await
+            })
+            .await
+        ),
+        "the grant was single use"
+    );
+    at.run(&runtime, async |tx, _| reviews::invitation(tx, &link_b).await)
+        .await
+        .expect("the other line's link is untouched");
+    let used: bool = scalar(
+        &runtime,
+        shop.tenant,
+        "SELECT used_at IS NOT NULL FROM review_tokens WHERE order_line_id = $1",
+        line_b,
+    )
+    .await;
+    assert!(!used);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn refused_action_keeps_the_grant_and_its_link_and_success_revokes_both(db: PgPool) {
+    let runtime = testkit::runtime_pool(&db, 2).await;
+    let (shop, at) = same_origin(&runtime, "lgatomic").await;
+    let (order, link) = shipped_withdrawal_link(&runtime, &shop).await;
+    let (grant, _) = at
+        .exchange(&runtime, Source::WithdrawalLink(&link), None)
+        .await
+        .unwrap();
+    let line: Uuid = scalar(
+        &runtime,
+        shop.tenant,
+        "SELECT id FROM order_lines WHERE order_id = $1",
+        order,
+    )
+    .await;
+    let input = |iban: &str| DeclareInput {
+        lines: vec![RefundLine {
+            order_line_id: line,
+            quantity: 1,
+        }],
+        iban: Some(iban.into()),
+        note: None,
+        confirm: true,
+    };
+
+    let refused = at
+        .atomic(&runtime, async |tx, ctx| {
+            withdrawals::declare_by_grant(tx, ctx, &grant, &input("CZ00 nonsense")).await
+        })
+        .await;
+    assert!(
+        matches!(&refused, Err(Error::Validation { code, .. }) if *code == "invalid_iban"),
+        "{refused:?}"
+    );
+    at.run(&runtime, async |tx, ctx| {
+        withdrawals::form_by_grant(tx, ctx, &grant).await
+    })
+    .await
+    .expect("a refused declaration keeps the grant and its link");
+    assert_eq!(
+        scalar::<i64>(
+            &runtime,
+            shop.tenant,
+            "SELECT count(*) FROM withdrawals WHERE order_id = $1",
+            order
+        )
+        .await,
+        0
+    );
+
+    at.atomic(&runtime, async |tx, ctx| {
+        withdrawals::declare_by_grant(tx, ctx, &grant, &input("CZ6508000000192000145399")).await
+    })
+    .await
+    .expect("the declaration succeeds");
+    assert!(
+        not_found(
+            &at.atomic(&runtime, async |tx, ctx| {
+                withdrawals::declare_by_grant(tx, ctx, &grant, &input("CZ6508000000192000145399"))
+                    .await
+            })
+            .await
+        ),
+        "a replay finds no grant"
+    );
+    assert!(not_found(&at.authorize(&runtime, &grant, Scope::Withdrawal).await));
+    assert!(
+        not_found(
+            &at.run(&runtime, async |tx, _| withdrawals::order_by_token(tx, &link).await)
+                .await
+        ),
+        "the declaration used the link"
+    );
+
+    let (_, review) = review_link(&runtime, &shop).await;
+    let (grant, _) = at
+        .exchange(&runtime, Source::ReviewLink(&review), None)
+        .await
+        .unwrap();
+    let refused = at
+        .atomic(&runtime, async |tx, ctx| {
+            reviews::submit_by_grant(tx, ctx, &grant, &text(9), None).await
+        })
+        .await;
+    assert!(
+        matches!(&refused, Err(Error::Validation { code, .. }) if *code == "invalid_rating"),
+        "{refused:?}"
+    );
+    at.run(&runtime, async |tx, ctx| {
+        reviews::invitation_by_grant(tx, ctx, &grant).await
+    })
+    .await
+    .expect("a refused review keeps the grant and its link");
+    at.atomic(&runtime, async |tx, ctx| {
+        reviews::submit_by_grant(tx, ctx, &grant, &text(5), None).await
+    })
+    .await
+    .unwrap();
+    assert!(not_found(&at.authorize(&runtime, &grant, Scope::Review).await));
+    assert!(
+        not_found(
+            &at.run(&runtime, async |tx, _| reviews::invitation(tx, &review).await)
+                .await
+        ),
+        "the review used the link"
+    );
 }

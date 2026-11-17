@@ -23,6 +23,10 @@ pub enum Scope {
     OrderRead(Uuid),
     /// The public withdrawal form (decision default 8): one emailed-link request, no reads.
     WithdrawalRequest,
+    /// An emailed withdrawal link: its order's withdrawal form and one declaration.
+    Withdrawal,
+    /// An emailed review link: its order line's invitation and one review.
+    Review,
 }
 
 impl Scope {
@@ -30,6 +34,8 @@ impl Scope {
         match self {
             Scope::OrderRead(id) => ("order_read", Some(id)),
             Scope::WithdrawalRequest => ("withdrawal_request", None),
+            Scope::Withdrawal => ("withdrawal", None),
+            Scope::Review => ("review", None),
         }
     }
 }
@@ -38,6 +44,8 @@ impl Scope {
 pub enum Source<'a> {
     OrderLink(&'a str),
     WithdrawalForm,
+    WithdrawalLink(&'a str),
+    ReviewLink(&'a str),
 }
 
 #[derive(Debug)]
@@ -57,12 +65,14 @@ pub async fn exchange(
 ) -> Result<Granted, Error> {
     let p = enter(tx, ctx).await?;
     require(&p, CheckoutMode::SameOrigin)?;
-    let (scope, link_hash, expires_at): (Scope, Option<Vec<u8>>, DateTime<Utc>) = match source {
+    let (scope, link_hash, action_hash, expires_at): (
+        Scope,
+        Option<Vec<u8>>,
+        Option<Vec<u8>>,
+        DateTime<Utc>,
+    ) = match source {
         Source::OrderLink(token) => {
-            if !capability::well_formed(token) {
-                return Err(Error::NotFound);
-            }
-            let hash = capability::hash(token);
+            let hash = link(token)?;
             let row = sqlx::query!(
                 "SELECT order_id, expires_at FROM order_tokens
                  WHERE token_hash = $1 AND expires_at > now()",
@@ -71,17 +81,38 @@ pub async fn exchange(
             .fetch_optional(&mut **tx)
             .await?
             .ok_or(Error::NotFound)?;
-            (
-                Scope::OrderRead(row.order_id),
-                Some(hash.to_vec()),
-                row.expires_at,
-            )
+            (Scope::OrderRead(row.order_id), Some(hash), None, row.expires_at)
         }
         Source::WithdrawalForm => (
             Scope::WithdrawalRequest,
             None,
+            None,
             Utc::now() + Duration::hours(ANONYMOUS_HOURS),
         ),
+        Source::WithdrawalLink(token) => {
+            let hash = link(token)?;
+            let expires_at = sqlx::query_scalar!(
+                "SELECT expires_at FROM withdrawal_tokens
+                 WHERE token_hash = $1 AND used_at IS NULL AND expires_at > now()",
+                hash.as_slice()
+            )
+            .fetch_optional(&mut **tx)
+            .await?
+            .ok_or(Error::NotFound)?;
+            (Scope::Withdrawal, None, Some(hash), expires_at)
+        }
+        Source::ReviewLink(token) => {
+            let hash = link(token)?;
+            let expires_at = sqlx::query_scalar!(
+                "SELECT expires_at FROM review_tokens
+                 WHERE token_hash = $1 AND used_at IS NULL AND expires_at > now()",
+                hash.as_slice()
+            )
+            .fetch_optional(&mut **tx)
+            .await?
+            .ok_or(Error::NotFound)?;
+            (Scope::Review, None, Some(hash), expires_at)
+        }
     };
     if let Some(previous) = previous.filter(|t| capability::well_formed(t)) {
         sqlx::query!(
@@ -96,13 +127,15 @@ pub async fn exchange(
     let (kind, order_id) = scope.columns();
     sqlx::query!(
         "INSERT INTO link_grants
-             (token_hash, tenant_id, scope, order_id, link_hash, origin, generation, expires_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+             (token_hash, tenant_id, scope, order_id, link_hash, action_hash, origin, generation,
+              expires_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
         minted.hash,
         tx.tenant_id(),
         kind,
         order_id,
         link_hash,
+        action_hash,
         p.origin,
         p.generation,
         expires_at
@@ -116,13 +149,15 @@ pub async fn exchange(
 }
 
 /// Checks `grant` for exactly `scope` on this origin and generation, locking it until commit,
-/// and refreshes its idle expiry. Anything else is `404` and refreshes nothing.
+/// and refreshes its idle expiry. Anything else is `404` and refreshes nothing. For
+/// [`Scope::Withdrawal`] and [`Scope::Review`] it returns the hash of the emailed link, which
+/// the caller checks is still unused.
 pub async fn authorize(
     tx: &mut TenantTx,
     ctx: &Context,
     grant: &str,
     scope: Scope,
-) -> Result<(), Error> {
+) -> Result<Option<Vec<u8>>, Error> {
     let p = live(tx, ctx, grant).await?;
     let (kind, order_id) = scope.columns();
     sqlx::query_scalar!(
@@ -130,7 +165,7 @@ pub async fn authorize(
            WHERE token_hash = $1 AND scope = $2 AND order_id IS NOT DISTINCT FROM $3
              AND origin = $4 AND generation = $5
              AND last_activity_at > now() - make_interval(mins => $6) AND expires_at > now()
-           RETURNING 1 AS "one!""#,
+           RETURNING action_hash"#,
         capability::hash(grant),
         kind,
         order_id,
@@ -140,7 +175,6 @@ pub async fn authorize(
     )
     .fetch_optional(&mut **tx)
     .await?
-    .map(|_| ())
     .ok_or(Error::NotFound)
 }
 
@@ -151,7 +185,7 @@ pub async fn complete(
     ctx: &Context,
     grant: &str,
     scope: Scope,
-) -> Result<(), Error> {
+) -> Result<Option<Vec<u8>>, Error> {
     let p = live(tx, ctx, grant).await?;
     let (kind, order_id) = scope.columns();
     sqlx::query_scalar!(
@@ -159,7 +193,7 @@ pub async fn complete(
            WHERE token_hash = $1 AND scope = $2 AND order_id IS NOT DISTINCT FROM $3
              AND origin = $4 AND generation = $5
              AND last_activity_at > now() - make_interval(mins => $6) AND expires_at > now()
-           RETURNING 1 AS "one!""#,
+           RETURNING action_hash"#,
         capability::hash(grant),
         kind,
         order_id,
@@ -169,8 +203,15 @@ pub async fn complete(
     )
     .fetch_optional(&mut **tx)
     .await?
-    .map(|_| ())
     .ok_or(Error::NotFound)
+}
+
+fn link(token: &str) -> Result<Vec<u8>, Error> {
+    if capability::well_formed(token) {
+        Ok(capability::hash(token))
+    } else {
+        Err(Error::NotFound)
+    }
 }
 
 async fn live<'a>(tx: &mut TenantTx, ctx: &'a Context, grant: &str) -> Result<Policy<'a>, Error> {

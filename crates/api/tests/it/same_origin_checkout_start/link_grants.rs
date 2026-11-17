@@ -389,3 +389,198 @@ async fn a_capability_replaced_at_placement_neither_reads_nor_pays_the_order(db:
         "the current capability pays"
     );
 }
+
+impl Ctx {
+    async fn on_grant(&self, call: Call<'_>, grant: &str) -> (StatusCode, String) {
+        let (status, text, _) = self
+            .edge
+            .call(call)
+            .header(GRANT, grant.to_owned())
+            .send_text(&self.s)
+            .await;
+        (status, text)
+    }
+
+    async fn emailed_withdrawal_link(&self, order: Uuid) -> String {
+        let minted = commerce::capability::mint();
+        let mut tx = platform::db::tenant_tx(&self.runtime, self.shop.tenant)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO withdrawal_tokens (token_hash, tenant_id, order_id, expires_at)
+             VALUES ($1, $2, $3, now() + interval '24 hours')",
+        )
+        .bind(&minted.hash)
+        .bind(self.shop.tenant)
+        .bind(order)
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+        tx.commit().await.unwrap();
+        minted.token
+    }
+
+    async fn emailed_review_link(&self) -> (Uuid, String) {
+        let (order, _) = self.order("delivered").await;
+        let mut tx = platform::db::tenant_tx(&self.runtime, self.shop.tenant)
+            .await
+            .unwrap();
+        let issued = commerce::reviews::issue_tokens(&mut tx, order, chrono::Utc::now())
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+        (issued[0].order_line_id, issued[0].token.clone())
+    }
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn withdrawal_link_grant_reads_its_form_declares_once_and_reads_no_order(db: PgPool) {
+    let c = setup(db, CheckoutMode::SameOrigin).await;
+    let (order, _) = c.order("shipped").await;
+    let link = c.emailed_withdrawal_link(order).await;
+    let line: Uuid = c
+        .scalar("SELECT id FROM order_lines WHERE order_id = $1", order)
+        .await;
+
+    let (status, body, grant) = c
+        .exchange(json!({ "kind": "withdrawal", "token": link }), None)
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    assert_eq!(
+        serde_json::from_str::<Value>(&body).unwrap(),
+        json!({ "resource": { "kind": "withdrawal" } })
+    );
+    let grant = grant.unwrap();
+
+    let (status, form) = c
+        .on_grant(Call::get("/storefront/v1/link-grants/withdrawal"), &grant)
+        .await;
+    assert_eq!(status, StatusCode::OK, "{form}");
+    assert!(!form.contains(&link) && !form.contains(&grant), "{form}");
+    assert_eq!(
+        c.order_by_grant(order, Some(&grant)).await.0,
+        StatusCode::NOT_FOUND,
+        "a withdrawal grant reads no order"
+    );
+    assert_eq!(
+        c.request_withdrawal(&grant, 1, "buyer@example.com").await,
+        StatusCode::NOT_FOUND,
+        "a withdrawal grant requests no other link"
+    );
+
+    let declare = |iban: &str| {
+        Call::post(
+            "/storefront/v1/link-grants/withdrawal",
+            json!({ "lines": [{ "order_line_id": line, "quantity": 1 }], "iban": iban, "confirm": true }),
+        )
+    };
+    let (status, body) = c.on_grant(declare("CZ00 nonsense"), &grant).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(
+        c.on_grant(Call::get("/storefront/v1/link-grants/withdrawal"), &grant)
+            .await
+            .0,
+        StatusCode::OK,
+        "a refused declaration keeps the grant"
+    );
+    let (status, receipt) = c
+        .on_grant(declare("CZ6508000000192000145399"), &grant)
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{receipt}");
+    assert!(!receipt.contains(&link) && !receipt.contains(&grant));
+    assert_eq!(
+        c.on_grant(declare("CZ6508000000192000145399"), &grant)
+            .await
+            .0,
+        StatusCode::NOT_FOUND,
+        "replay"
+    );
+    assert_eq!(
+        c.on_grant(Call::get("/storefront/v1/link-grants/withdrawal"), &grant)
+            .await
+            .0,
+        StatusCode::NOT_FOUND,
+        "the declaration revoked the grant"
+    );
+    assert_eq!(
+        c.exchange(json!({ "kind": "withdrawal", "token": link }), None)
+            .await
+            .0,
+        StatusCode::NOT_FOUND,
+        "the declaration used the link"
+    );
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn review_link_grant_submits_only_its_own_line_once(db: PgPool) {
+    let c = setup(db, CheckoutMode::SameOrigin).await;
+    let (line, link) = c.emailed_review_link().await;
+    let (other_line, other) = c.emailed_review_link().await;
+
+    let (status, body, grant) = c
+        .exchange(json!({ "kind": "review", "token": link }), None)
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    assert_eq!(
+        serde_json::from_str::<Value>(&body).unwrap(),
+        json!({ "resource": { "kind": "review" } })
+    );
+    let grant = grant.unwrap();
+    let (status, invitation) = c
+        .on_grant(Call::get("/storefront/v1/link-grants/review"), &grant)
+        .await;
+    assert_eq!(status, StatusCode::OK, "{invitation}");
+
+    let review = |rating: i64| json!({ "rating": rating, "name": "Jana N.", "body": "Sedí." });
+    let mut with_other = review(5);
+    with_other["token"] = json!(other);
+    let (status, _) = c
+        .on_grant(
+            Call::post("/storefront/v1/link-grants/review", with_other),
+            &grant,
+        )
+        .await;
+    assert!(status.is_client_error(), "no link travels in the body");
+    let (status, body) = c
+        .on_grant(
+            Call::post("/storefront/v1/link-grants/review", review(9)),
+            &grant,
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    let (status, body) = c
+        .on_grant(
+            Call::post("/storefront/v1/link-grants/review", review(5)),
+            &grant,
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    assert_eq!(
+        c.on_grant(
+            Call::post("/storefront/v1/link-grants/review", review(4)),
+            &grant
+        )
+        .await
+        .0,
+        StatusCode::NOT_FOUND,
+        "single use"
+    );
+    let reviewed: Vec<Uuid> = {
+        let mut tx = platform::db::tenant_tx(&c.runtime, c.shop.tenant)
+            .await
+            .unwrap();
+        sqlx::query_scalar("SELECT order_line_id FROM reviews")
+            .fetch_all(&mut *tx)
+            .await
+            .unwrap()
+    };
+    assert_eq!(reviewed, vec![line]);
+    assert_ne!(line, other_line);
+    assert_eq!(
+        c.exchange(json!({ "kind": "review", "token": other }), None)
+            .await
+            .0,
+        StatusCode::CREATED,
+        "the other line's link is unused"
+    );
+}
