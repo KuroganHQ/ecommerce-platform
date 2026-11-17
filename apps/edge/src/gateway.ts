@@ -1823,11 +1823,12 @@ ${
         body: JSON.stringify(previous ? { link, previous } : { link }),
       }),
     );
+    if (res.status !== 201) {
+      await res.body?.cancel().catch(() => undefined);
+      return seeOther(REOPEN_LINK_PATH);
+    }
     const grant = res.headers.get(LINK_GRANT_HEADER);
-    const body =
-      res.status === 201
-        ? ((await res.json().catch(() => null)) as { resource?: unknown } | null)
-        : await res.body?.cancel().catch(() => undefined);
+    const body = (await res.json().catch(() => null)) as { resource?: unknown } | null;
     const location = cleanUrl(body?.resource);
     if (!location || !grant || !TOKEN_RE.test(grant)) return seeOther(REOPEN_LINK_PATH);
     return new Response(null, {

@@ -1,61 +1,18 @@
-use chrono::Utc;
 use commerce::capability;
 use commerce::checkout_access::ShopOrigin;
 use commerce::link_access::{self, Link, Scope};
 use commerce::orders;
-use commerce::storefront::{self, Context, PublicUrls};
 use commerce::tenancy::CheckoutMode;
 use platform::Error;
-use platform::db::{TenantTx, tenant_tx};
+use platform::db::tenant_tx;
 use sqlx::PgPool;
 use testkit::storefront::{Shop, shop};
 use tokio::sync::oneshot;
 use uuid::Uuid;
 
-use crate::checkout_access::{attest, blocked_by, pid, switch};
-
-#[derive(Clone)]
-struct At {
-    tenant: Uuid,
-    market: Uuid,
-    origin: ShopOrigin,
-}
+use crate::checkout_access::{At, at, attest, blocked_by, pid, switch};
 
 impl At {
-    fn of(shop: &Shop) -> Self {
-        Self {
-            tenant: shop.tenant,
-            market: shop.cz,
-            origin: shop.origin.clone(),
-        }
-    }
-
-    async fn tx(&self, runtime: &PgPool) -> (TenantTx, Context) {
-        let mut tx = tenant_tx(runtime, self.tenant).await.unwrap();
-        let mut ctx = storefront::context(
-            &mut tx,
-            &PublicUrls::default(),
-            self.market,
-            None,
-            Utc::now(),
-        )
-        .await
-        .unwrap();
-        ctx.origin = Some(self.origin.clone());
-        (tx, ctx)
-    }
-
-    async fn run<T>(
-        &self,
-        runtime: &PgPool,
-        f: impl AsyncFnOnce(&mut TenantTx, &Context) -> Result<T, Error>,
-    ) -> Result<T, Error> {
-        let (mut tx, ctx) = self.tx(runtime).await;
-        let out = f(&mut tx, &ctx).await?;
-        tx.commit().await.unwrap();
-        Ok(out)
-    }
-
     async fn exchange(
         &self,
         runtime: &PgPool,
@@ -63,8 +20,9 @@ impl At {
         previous: Option<&str>,
     ) -> Result<(String, Scope), Error> {
         self.run(runtime, async |tx, ctx| {
-            let g = link_access::exchange(tx, ctx, link, previous).await?;
-            Ok((g.token, g.scope))
+            link_access::exchange(tx, ctx, link, previous)
+                .await
+                .map(|g| (g.token, g.scope))
         })
         .await
     }
@@ -88,7 +46,7 @@ async fn same_origin(runtime: &PgPool, slug: &str) -> (Shop, At) {
     let shop = shop(runtime, slug).await;
     attest(runtime, &shop.origin).await;
     switch(runtime, &shop, &shop.origin, CheckoutMode::SameOrigin).await;
-    let at = At::of(&shop);
+    let at = at(&shop, shop.cz, &shop.origin);
     (shop, at)
 }
 
@@ -410,10 +368,7 @@ async fn grant_denied_on_alias_other_tenant_and_after_mode_switch(db: PgPool) {
     let alias_origin = ShopOrigin::parse("https://lgalias-alias.localhost").unwrap();
     attest(&runtime, &alias_origin).await;
     switch(&runtime, &shop, &alias_origin, CheckoutMode::SameOrigin).await;
-    let alias = At {
-        origin: alias_origin,
-        ..at.clone()
-    };
+    let alias = crate::checkout_access::at(&shop, shop.cz, &alias_origin);
     let (grant, _) = at
         .exchange(&runtime, Link::Order(&token), Some(&grant))
         .await
