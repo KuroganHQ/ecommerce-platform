@@ -214,6 +214,13 @@ async fn serve() -> anyhow::Result<()> {
         );
     }
     let db = platform::db::pool(&DbConfig::from_env()?)?;
+    let account_domain = sf
+        .account_domain
+        .clone()
+        .ok_or(platform::config::ConfigError::Missing("ACCOUNT_DOMAIN"))?;
+    commerce::tenancy::ensure_account_domain(&db, &account_domain)
+        .await
+        .with_context(|| format!("ACCOUNT_DOMAIN {account_domain}"))?;
     let http = reqwest::Client::builder()
         .timeout(Duration::from_secs(5))
         .build()?;
@@ -258,6 +265,7 @@ async fn serve() -> anyhow::Result<()> {
         public_urls: commerce::storefront::PublicUrls {
             scheme: sf.scheme.clone(),
             port: sf.port,
+            account_domain: account_domain.clone(),
         },
         edge: api::edge::EdgePurge::new(sf.edge_purge_url, sf.edge_purge_token),
         webhooks: webhooks(&ops, cfg.env)?,
@@ -269,6 +277,7 @@ async fn serve() -> anyhow::Result<()> {
                 commerce::storefront::PublicUrls {
                     scheme: sf.scheme,
                     port: sf.port,
+                    account_domain,
                 },
             )),
             None => None,

@@ -13,6 +13,7 @@ import { tabTo } from "../keyboard";
 import { testContext } from "../rate-client";
 import { hydrated } from "../storefront/support";
 import {
+  ACCOUNT,
   acceptAndPlace,
   CZ,
   checkoutOf,
@@ -154,10 +155,10 @@ async function expectNothingStored(page: Page, writes: string[]) {
   ).toEqual([]);
 }
 
-/** Email-link sign-in on the checkout origin; lands on `next`. */
-async function signIn(page: Page, shop: string, email: string, next: string) {
+/** Email-link sign-in on the CZ account origin (SHOP-95); lands on `next` there. */
+async function signIn(page: Page, email: string, next: string) {
   const since = new Date(Date.now() - 1000);
-  await page.goto(`${checkoutOf(shop)}/account?next=${next}`);
+  await page.goto(`${ACCOUNT}/account?next=${next}`);
   const form = page.locator("form").first();
   await form.getByLabel("E-mail").fill(email);
   await form.getByRole("button", { name: "Poslat přihlašovací odkaz" }).click();
@@ -184,7 +185,7 @@ async function signIn(page: Page, shop: string, email: string, next: string) {
   if (!link) throw new Error(`no sign-in link for ${email}`);
   await page.goto(link);
   await page.getByRole("button", { name: "Přihlásit se" }).click();
-  await page.waitForURL(`${checkoutOf(shop)}${next}`);
+  await page.waitForURL(`${ACCOUNT}${next}`);
 }
 
 test("guest checkout in CZ: Packeta pickup point, fake payment, confirmation page and email", async ({
@@ -408,7 +409,19 @@ test("a signed-in customer finds the order in the account", async ({ browser }) 
   const page = await newPage(browser);
   const email = `ucet-${run}@example.test`;
   await toCheckout(page, CZ, "tricko-henley");
-  await signIn(page, CZ, email, "/");
+  // Email links land on the account origin; until SHOP-95 slice 2 the checkout origin still
+  // takes a password sign-in.
+  await signIn(page, email, "/account/security");
+  const password = "správné koňské heslo";
+  await page.getByLabel("Nové heslo").fill(password);
+  await page.getByRole("button", { name: "Uložit heslo" }).click();
+  await expect(page.getByRole("status")).toContainText("Heslo je uložené");
+  await page.goto(`${checkoutOf(CZ)}/account?next=/`);
+  await page.locator("summary", { hasText: "Heslem" }).click();
+  await page.locator("details form").getByLabel("E-mail").fill(email);
+  await page.locator("details form").getByLabel("Heslo").fill(password);
+  await page.locator("details form").getByRole("button", { name: "Přihlásit se" }).click();
+  await page.waitForURL(`${checkoutOf(CZ)}/`);
   await expect(page.getByText(`Nakupujete jako ${email}`)).toBeVisible();
   await expect(page.locator('input[autocomplete="email"]')).toHaveValue(email);
   await fillContactAndAddress(page, null);
@@ -417,7 +430,7 @@ test("a signed-in customer finds the order in the account", async ({ browser }) 
   await acceptAndPlace(page);
   const token = await fakePay(page, "Pay");
   const o = await order(page, CZ, token);
-  await page.goto(`${checkoutOf(CZ)}/account`);
+  await page.goto(`${ACCOUNT}/account`);
   await expect(page.getByTestId("account-orders")).toContainText(o.number);
   await page.getByRole("link", { name: `Zobrazit ${o.number}` }).click();
   await expect(page.getByRole("heading", { level: 1 })).toContainText(o.number);
@@ -436,7 +449,7 @@ test("a guest order joins the account after an email-link sign-in (A5)", async (
   const token = await fakePay(page, "Pay");
   const o = await order(page, CZ, token);
 
-  await signIn(page, CZ, email, "/account");
+  await signIn(page, email, "/account");
   // `customer.email_verified` → the worker links the guest orders.
   await expect
     .poll(

@@ -725,7 +725,10 @@ pub async fn resolve_preview(
     let Some((number, shop)) = parse_preview_host(host) else {
         return Ok(None);
     };
-    let Some(mut site) = tenancy::resolve_host(db, shop).await? else {
+    let Some(mut site) = tenancy::resolve_host(db, shop)
+        .await?
+        .filter(|s| s.kind == tenancy::HostKind::Shop)
+    else {
         return Ok(None);
     };
     let Some(revision_id) = keys.verify_preview(site.tenant_id, token, now.timestamp()) else {

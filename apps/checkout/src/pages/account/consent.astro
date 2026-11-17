@@ -1,0 +1,35 @@
+---
+import { t } from "@platform/storefront-sdk/format";
+import ConsentForm from "../../islands/ConsentForm";
+import Checkout from "../../layouts/Checkout.astro";
+import { accountLinks, checkoutApi, messages } from "../../lib/api";
+
+// The account's email preferences (A20). Cookie purposes stay with the browser on the shop.
+const api = checkoutApi(Astro.request);
+const [shop, me] = await Promise.all([api.shop(), api.me()]);
+if (!me) return Astro.redirect("/account?next=/account/consent");
+const state = await api.accountConsent();
+const m = shop?.messages ?? {};
+---
+
+<Checkout
+  title={t(m, "account.privacy")}
+  shopName={shop?.name ?? ""}
+  {...accountLinks(shop, Astro.url)}
+  lang={shop?.locale ?? "cs"}
+  accountLabel={t(m, "account.nav")}
+>
+  <div class="grid max-w-xl gap-4">
+    <a href="/account" class="text-sm text-identity-ink underline">← {t(m, "account.back")}</a>
+    <h1 class="font-display text-2xl font-bold">{t(m, "account.privacy")}</h1>
+    <p class="text-sm text-muted-foreground">{t(m, "consent.preferences_intro")}</p>
+    <ConsentForm
+      client:load
+      m={messages(m, "consent.", "account.error", "account.too_many")}
+      purposes={state?.purposes ?? {}}
+      textVersion={shop?.consent.text_version ?? "1"}
+      shown={["email_marketing", "review_invites"]}
+      endpoint="/_p/account/consent"
+    />
+  </div>
+</Checkout>

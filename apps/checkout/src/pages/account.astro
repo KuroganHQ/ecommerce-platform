@@ -3,9 +3,9 @@ import { t } from "@platform/storefront-sdk/format";
 import SignIn from "../islands/SignIn";
 import SignOut from "../islands/SignOut";
 import Checkout from "../layouts/Checkout.astro";
-import { checkoutApi, messages, shopUrl } from "../lib/api";
+import { accountLinks, checkoutApi, messages } from "../lib/api";
 
-// Customer accounts live on the checkout origin only (A1, A5).
+// Customer accounts: the account origin (A1), and the checkout origin until SHOP-95 slice 2.
 const api = checkoutApi(Astro.request);
 const [shop, me] = await Promise.all([api.shop(), api.me()]);
 const orders = me ? await api.orders() : [];
@@ -19,14 +19,18 @@ const links = [
     hint: t(m, "account.addresses_intro"),
   },
   { href: "/account/security", label: t(m, "account.security"), hint: t(m, "password.set_intro") },
-  { href: "/consent", label: t(m, "account.privacy"), hint: t(m, "consent.preferences_intro") },
+  {
+    href: "/account/consent",
+    label: t(m, "account.privacy"),
+    hint: t(m, "consent.preferences_intro"),
+  },
 ];
 ---
 
 <Checkout
   title={me ? t(m, "account.title") : t(m, "account.sign_in")}
   shopName={shop?.name ?? ""}
-  shopUrl={shopUrl(Astro.url)}
+  {...accountLinks(shop, Astro.url)}
   lang={shop?.locale ?? "cs"}
   accountLabel={t(m, "account.nav")}
 >

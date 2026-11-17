@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT (SELECT d.hostname FROM platform.domains d\n                 WHERE d.market_id = m.id AND d.verified_at IS NOT NULL\n                 ORDER BY d.is_primary DESC, d.hostname LIMIT 1)\n         FROM markets m\n         WHERE CASE WHEN $1::text IS NULL THEN m.is_default\n                    ELSE m.code = $1 AND NOT m.is_default END",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "hostname",
+        "type_info": "Text",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "861fa13e0616cd6c1b0f5260e933019113b32616a548b5e906b729ed954f2f78"
+}

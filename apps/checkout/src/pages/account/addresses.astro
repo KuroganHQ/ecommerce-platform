@@ -2,7 +2,7 @@
 import { t } from "@platform/storefront-sdk/format";
 import Addresses from "../../islands/Addresses";
 import Checkout from "../../layouts/Checkout.astro";
-import { checkoutApi, marketCountries, messages, shopUrl } from "../../lib/api";
+import { accountLinks, checkoutApi, marketCountries, messages } from "../../lib/api";
 
 const api = checkoutApi(Astro.request);
 const [shop, me] = await Promise.all([api.shop(), api.me()]);
@@ -14,7 +14,7 @@ const m = shop?.messages ?? {};
 <Checkout
   title={t(m, "account.addresses")}
   shopName={shop?.name ?? ""}
-  shopUrl={shopUrl(Astro.url)}
+  {...accountLinks(shop, Astro.url)}
   lang={shop?.locale ?? "cs"}
   accountLabel={t(m, "account.nav")}
 >

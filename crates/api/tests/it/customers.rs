@@ -228,7 +228,7 @@ async fn magic_link_requests_do_not_reveal_accounts_and_are_rate_limited(db: PgP
         .await
         .unwrap();
     assert_eq!(customers, 0);
-    // The stored redirect was sanitized; the email carries the checkout-origin link.
+    // The stored redirect was sanitized; the email carries the account-origin link.
     let (redirect, text): (String, String) = sqlx::query_as(
         "SELECT l.redirect, m.body_text FROM customer_magic_links l, email_messages m LIMIT 1",
     )
@@ -237,7 +237,7 @@ async fn magic_link_requests_do_not_reveal_accounts_and_are_rate_limited(db: PgP
     .unwrap();
     assert_eq!(redirect, "/account");
     assert!(
-        text.contains("http://checkout.shop.localhost:8080/account/verify?token="),
+        text.contains("http://shop.accounts.localhost:8080/account/verify?token="),
         "{text}"
     );
     let (status, _, _) = c
@@ -844,4 +844,177 @@ async fn consent_is_recorded_resolved_and_linked_at_sign_in(db: PgPool) {
             .await
             .is_err()
     );
+}
+
+async fn latest_mail(c: &Ctx, template: &str) -> String {
+    let mut tx = platform::db::tenant_tx(&c.runtime, c.shop.tenant)
+        .await
+        .unwrap();
+    sqlx::query_scalar(
+        "SELECT body_text FROM email_messages WHERE template = $1 ORDER BY created_at DESC LIMIT 1",
+    )
+    .bind(template)
+    .fetch_one(&mut *tx)
+    .await
+    .unwrap()
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn magic_link_points_to_account_origin(db: PgPool) {
+    let c = setup(db).await;
+    let (session, _) = c.sign_in("ada@example.test", &[]).await;
+    let text = latest_mail(&c, "magic_link").await;
+    assert!(
+        text.contains("http://shop.accounts.localhost:8080/account/verify?token="),
+        "{text}"
+    );
+    assert!(!text.contains("checkout."), "{text}");
+
+    let (status, _, _) = sf(
+        Call::post(
+            "/storefront/v1/customer/magic-link",
+            json!({"email": "ada@example.test"}),
+        ),
+        &c.shop,
+        c.shop.sk,
+    )
+    .send(&c.s)
+    .await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+    let text = latest_mail(&c, "magic_link").await;
+    assert!(
+        text.contains("http://sk--shop.accounts.localhost:8080/account/verify?token="),
+        "{text}"
+    );
+
+    let (status, body, _) = c
+        .call(
+            Call::post(
+                "/storefront/v1/customer/password",
+                json!({"new_password": "correct horse battery"}),
+            )
+            .header("x-customer-session", session),
+        )
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
+    let text = latest_mail(&c, "password_changed").await;
+    assert!(
+        text.contains("http://shop.accounts.localhost:8080/account"),
+        "{text}"
+    );
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn account_consent_requires_session(db: PgPool) {
+    let c = setup(db).await;
+    let choice = json!({"purposes": {"email_marketing": true}, "text_version": "v1"});
+    for call in [
+        Call::get("/storefront/v1/customer/consent"),
+        Call::post("/storefront/v1/customer/consent", choice.clone()),
+        Call::get("/storefront/v1/customer/consent").header("x-customer-session", "f".repeat(64)),
+        Call::post("/storefront/v1/customer/consent", choice.clone())
+            .header("x-customer-session", "f".repeat(64)),
+    ] {
+        let (status, body, _) = c.call(call).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED, "{body}");
+    }
+    let mut tx = platform::db::tenant_tx(&c.runtime, c.shop.tenant)
+        .await
+        .unwrap();
+    let records: i64 = sqlx::query_scalar("SELECT count(*) FROM consent_records")
+        .fetch_one(&mut *tx)
+        .await
+        .unwrap();
+    assert_eq!(records, 0);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn account_consent_saves_email_purposes_only(db: PgPool) {
+    let c = setup(db).await;
+    let (session, body) = c.sign_in("eva@example.test", &[]).await;
+    let customer = body["customer"]["id"].as_str().unwrap().to_owned();
+    let get = || {
+        Call::get("/storefront/v1/customer/consent").header("x-customer-session", session.clone())
+    };
+
+    let (status, state, res) = c.call(get()).await;
+    assert_eq!(status, StatusCode::OK, "{state}");
+    assert_eq!(res.headers()["cache-control"], "no-store");
+    assert_eq!(state["text_version"], Value::Null);
+
+    let (status, state, res) = c
+        .call(
+            Call::post(
+                "/storefront/v1/customer/consent",
+                json!({"purposes": {"email_marketing": true, "review_invites": false}, "text_version": "v1", "source": "banner"}),
+            )
+            .header("x-customer-session", session.clone())
+            .header("x-consent-subject", "a".repeat(32)),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{state}");
+    assert!(res.headers().get("x-consent-subject").is_none());
+    assert!(res.headers().get("x-consent-summary").is_none());
+    assert_eq!(
+        state,
+        json!({"purposes": {"analytics": null, "ads": null, "personalization": null, "email_marketing": true, "review_invites": false}, "text_version": "v1"})
+    );
+    let (_, again, _) = c.call(get()).await;
+    assert_eq!(again, state);
+
+    let mut tx = platform::db::tenant_tx(&c.runtime, c.shop.tenant)
+        .await
+        .unwrap();
+    let rows: Vec<(String, String, String, String)> = sqlx::query_as(
+        "SELECT subject_type, subject_id, purpose, source FROM consent_records ORDER BY purpose",
+    )
+    .fetch_all(&mut *tx)
+    .await
+    .unwrap();
+    assert_eq!(
+        rows,
+        vec![
+            (
+                "customer".into(),
+                customer.clone(),
+                "email_marketing".into(),
+                "account".into()
+            ),
+            (
+                "customer".into(),
+                customer,
+                "review_invites".into(),
+                "account".into()
+            ),
+        ]
+    );
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn account_consent_rejects_cookie_purposes(db: PgPool) {
+    let c = setup(db).await;
+    let (session, _) = c.sign_in("ivo@example.test", &[]).await;
+    for bad in [
+        json!({"purposes": {"analytics": true}, "text_version": "v1"}),
+        json!({"purposes": {"email_marketing": true, "ads": false}, "text_version": "v1"}),
+        json!({"purposes": {"personalization": true}, "text_version": "v1"}),
+        json!({"purposes": {}, "text_version": "v1"}),
+        json!({"purposes": {"email_marketing": true}, "text_version": "v 1"}),
+    ] {
+        let (status, body, _) = c
+            .call(
+                Call::post("/storefront/v1/customer/consent", bad.clone())
+                    .header("x-customer-session", session.clone()),
+            )
+            .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{bad} {body}");
+    }
+    let mut tx = platform::db::tenant_tx(&c.runtime, c.shop.tenant)
+        .await
+        .unwrap();
+    let records: i64 = sqlx::query_scalar("SELECT count(*) FROM consent_records")
+        .fetch_one(&mut *tx)
+        .await
+        .unwrap();
+    assert_eq!(records, 0);
 }

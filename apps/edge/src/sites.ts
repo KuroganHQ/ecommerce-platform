@@ -3,6 +3,8 @@
  * `GET /internal/v1/resolve?host=` (spec §8.4) by `ApiResolver`.
  */
 export interface Site {
+  /** `account`: `<label>.<account domain>`, which serves customer accounts only (A1). */
+  kind?: "shop" | "account";
   tenant_id: string;
   market_id: string;
   /** The market's default locale (no path prefix); a prefixed request overrides it. */
@@ -144,6 +146,8 @@ export class StaticResolver implements SiteResolver {
 /** The resolve response of the API (`commerce::tenancy::Resolved`). */
 interface Resolved {
   hostname: string;
+  kind?: "shop" | "account";
+  shop_hostname?: string;
   tenant_id: string;
   market_id: string;
   default_locale: string;
@@ -184,11 +188,12 @@ export class ApiResolver implements SiteResolver {
 
 function toSite(r: Resolved): Site {
   return {
+    kind: r.kind ?? "shop",
     tenant_id: r.tenant_id,
     market_id: r.market_id,
     locale: r.default_locale,
     locales: r.locales,
-    shop_host: r.hostname,
+    shop_host: r.shop_hostname ?? r.hostname,
     storefront_token: r.storefront_token,
     theme_artifact: r.theme_artifact,
     retained_artifacts: r.retained_artifacts,

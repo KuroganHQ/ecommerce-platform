@@ -141,6 +141,7 @@ pub fn state(db: PgPool, jwks: &Jwks, forced_interval: Duration) -> AppState {
         public_urls: commerce::storefront::PublicUrls {
             scheme: "http".into(),
             port: Some(8080),
+            account_domain: "accounts.localhost".into(),
         },
         edge: api::edge::EdgePurge::disabled(),
         checkout: Arc::new(commerce::checkout::Settings {

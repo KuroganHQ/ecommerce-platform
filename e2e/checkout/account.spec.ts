@@ -1,14 +1,15 @@
 /**
- * Customer account on the checkout origin (WP9, spec A1, A4, A5, A20) against the seeded demo
- * shop (`make up && make seed`): email-link sign-in via Mailpit, addresses,
- * password, sign-out, password sign-in, cart merge, the theme's consent banner → the platform
+ * Customer account on its own origin (SHOP-95, A1, A5, A20) against the seeded demo shop
+ * (`make up && make seed`): email-link sign-in via Mailpit, addresses, password, sign-out,
+ * password sign-in, email preferences; on the checkout origin, which still serves accounts until
+ * SHOP-95 slice 2, the cart merge at sign-in and the theme's consent banner → the platform
  * record → the preferences page.
  */
 
 import { expect, type Page, test } from "@playwright/test";
 import { expectAccessible, mailpit, run } from "../admin/support";
 import { rateHeaders, testContext } from "../rate-client";
-import { deferHydration } from "./support";
+import { ACCOUNT_SK, ACCOUNT as account, deferHydration } from "./support";
 
 const port = process.env.HTTP_PORT ?? "8080";
 const shop = `http://demo.localhost:${port}`;
@@ -76,9 +77,9 @@ async function cartToCheckout(quantity: number): Promise<void> {
   ]);
 }
 
-test("email-link sign-in creates the account and attaches the cart", async () => {
-  await cartToCheckout(1);
-  await page.goto(`${checkout}/account`);
+test("email-link sign-in on the account origin creates the account", async () => {
+  await page.goto(`${account}/`);
+  await expect(page).toHaveURL(`${account}/account`);
   await expect(page.getByRole("heading", { level: 1, name: "Přihlášení" })).toBeVisible();
   await expectAccessible(page, "sign-in");
   const since = new Date(Date.now() - 1000);
@@ -88,11 +89,11 @@ test("email-link sign-in creates the account and attaches the cart", async () =>
   await expect(page.getByRole("status")).toContainText(email);
 
   const link = await accountLink(email, since);
-  expect(link.startsWith(`${checkout}/account/verify?token=`)).toBe(true);
+  expect(link.startsWith(`${account}/account/verify?token=`)).toBe(true);
   const verify = await page.goto(link);
   expect(verify?.headers()["referrer-policy"]).toBe("no-referrer");
   await page.getByRole("button", { name: "Přihlásit se" }).click();
-  await page.waitForURL(`${checkout}/account`);
+  await page.waitForURL(`${account}/account`);
   await expect(page.getByTestId("signed-in-as")).toContainText(email);
   await expectAccessible(page, "account");
 
@@ -101,19 +102,27 @@ test("email-link sign-in creates the account and attaches the cart", async () =>
   await page.getByRole("button", { name: "Přihlásit se" }).click();
   await expect(page.getByRole("alert")).toContainText("Odkaz vypršel");
 
-  // The session cookie is host-only on the checkout origin and invisible to scripts.
-  const cookies = await page.context().cookies(checkout);
+  // The session cookie is host-only on the account origin and invisible to scripts.
+  const cookies = await page.context().cookies(account);
   const sid = cookies.find((c) => c.name === "__Host-sid");
   expect(sid?.httpOnly).toBe(true);
   expect(sid?.sameSite).toBe("Lax");
-  expect((await page.context().cookies(shop)).some((c) => c.name === "__Host-sid")).toBe(false);
+  expect(sid?.domain).toBe("demo.accounts.localhost");
+  for (const origin of [shop, checkout, ACCOUNT_SK])
+    expect((await page.context().cookies(origin)).some((c) => c.name === "__Host-sid")).toBe(false);
+
+  // Shop links lead back to the shop, not to this origin.
+  await expect(page.getByRole("banner").getByRole("link").first()).toHaveAttribute(
+    "href",
+    `${shop}/`,
+  );
 });
 
 test("address controls wait for hydration", async () => {
   const release = await deferHydration(page);
   const add = page.getByRole("button", { name: "Přidat adresu" });
   try {
-    await page.goto(`${checkout}/account/addresses`, { waitUntil: "commit" });
+    await page.goto(`${account}/account/addresses`, { waitUntil: "commit" });
     await expect(add).toBeVisible();
     await expect(add).toBeDisabled();
   } finally {
@@ -124,7 +133,7 @@ test("address controls wait for hydration", async () => {
 });
 
 test("adds an address", async () => {
-  await page.goto(`${checkout}/account`);
+  await page.goto(`${account}/account`);
   await page.getByRole("link", { name: /Adresy/ }).click();
   await expect(page.getByText("Zatím nemáte uloženou žádnou adresu.")).toBeVisible();
   await page.getByRole("button", { name: "Přidat adresu" }).click();
@@ -151,7 +160,7 @@ test("adds an address", async () => {
 test("sets a password right after the email-link sign-in, then signs out", async () => {
   const releasePassword = await deferHydration(page);
   try {
-    await page.goto(`${checkout}/account/security`, { waitUntil: "commit" });
+    await page.goto(`${account}/account/security`, { waitUntil: "commit" });
     await expect(page.locator('input[autocomplete="new-password"]')).toBeVisible();
     await expect(page.locator('input[autocomplete="new-password"]')).toBeDisabled();
     await expect(page.getByRole("button", { name: "Uložit heslo" })).toBeDisabled();
@@ -166,7 +175,7 @@ test("sets a password right after the email-link sign-in, then signs out", async
 
   const releaseSignOut = await deferHydration(page);
   try {
-    await page.goto(`${checkout}/account`, { waitUntil: "commit" });
+    await page.goto(`${account}/account`, { waitUntil: "commit" });
     await expect(page.getByRole("button", { name: "Odhlásit se" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Odhlásit se" })).toBeDisabled();
   } finally {
@@ -175,11 +184,59 @@ test("sets a password right after the email-link sign-in, then signs out", async
   await page.getByRole("button", { name: "Odhlásit se" }).click();
   await expect(page.getByRole("heading", { level: 1, name: "Přihlášení" })).toBeVisible();
   // Account pages need a session again.
-  await page.goto(`${checkout}/account/addresses`);
-  await expect(page).toHaveURL(`${checkout}/account?next=/account/addresses`);
+  await page.goto(`${account}/account/addresses`);
+  await expect(page).toHaveURL(`${account}/account?next=/account/addresses`);
 });
 
-test("password sign-in merges the new cart with the account's earlier one", async () => {
+test("password sign-in on the account origin", async () => {
+  await page.goto(`${account}/account?next=/account/security`);
+  await page.locator("summary", { hasText: "Heslem" }).click();
+  const form = page.locator("details form");
+  await form.getByLabel("E-mail").fill(email);
+  await form.getByLabel("Heslo").fill("wrong password!!");
+  await form.getByRole("button", { name: "Přihlásit se" }).click();
+  await expect(page.getByRole("alert")).toHaveText("E-mail nebo heslo nesedí.");
+  await form.getByLabel("Heslo").fill(password);
+  await form.getByRole("button", { name: "Přihlásit se" }).click();
+  await page.waitForURL(`${account}/account/security`);
+  await expect(page.getByLabel("Současné heslo")).toBeVisible();
+});
+
+test("email_preferences_save_and_reload", async () => {
+  await page.goto(`${account}/account`);
+  await page.getByRole("link", { name: /Soukromí a souhlasy/ }).click();
+  await expect(page).toHaveURL(`${account}/account/consent`);
+  await expect(page.getByRole("heading", { level: 1, name: "Soukromí a souhlasy" })).toBeVisible();
+  // Email purposes only: cookie choices belong to the browser on the shop.
+  await expect(page.getByRole("checkbox")).toHaveCount(2);
+  const newsletter = page.getByRole("checkbox", { name: "E-mailový marketing" });
+  await expect(newsletter).not.toBeChecked();
+  await expectAccessible(page, "email preferences");
+  await page.getByText("E-mailový marketing", { exact: true }).click();
+  await page.getByRole("button", { name: "Uložit výběr" }).click();
+  await expect(page.getByRole("status")).toHaveText("Uloženo.");
+  await page.reload();
+  await expect(page.getByRole("checkbox", { name: "E-mailový marketing" })).toBeChecked();
+  // The shop got no consent cookie from it.
+  expect((await page.context().cookies(shop)).some((c) => c.name === "consent")).toBe(false);
+
+  // Withdrawn the same way.
+  await page.getByText("E-mailový marketing", { exact: true }).click();
+  await page.getByRole("button", { name: "Uložit výběr" }).click();
+  await expect(page.getByRole("status")).toHaveText("Uloženo.");
+  await page.reload();
+  await expect(page.getByRole("checkbox", { name: "E-mailový marketing" })).not.toBeChecked();
+});
+
+test("password sign-in on the checkout origin merges the new cart with the account's earlier one", async () => {
+  await cartToCheckout(1);
+  await page.goto(`${checkout}/account?next=/`);
+  await page.locator("summary", { hasText: "Heslem" }).click();
+  await page.locator("details form").getByLabel("E-mail").fill(email);
+  await page.locator("details form").getByLabel("Heslo").fill(password);
+  await page.locator("details form").getByRole("button", { name: "Přihlásit se" }).click();
+  await page.waitForURL(`${checkout}/`);
+  await page.context().clearCookies({ name: "__Host-sid" });
   await cartToCheckout(2);
   await page.goto(`${checkout}/account?next=/`);
   await page.locator("summary", { hasText: "Heslem" }).click();

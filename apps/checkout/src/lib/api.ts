@@ -33,6 +33,7 @@ export function checkoutApi(request: Request) {
     me: () => get<Customer>("/customer/me"),
     addresses: async () => (await get<{ items: Address[] }>("/customer/addresses"))?.items ?? [],
     consent: () => get<ConsentState>("/consent"),
+    accountConsent: () => get<ConsentState>("/customer/consent"),
     // WP10: the checkout of the handed-off cart, the order page, account orders.
     checkout: () => get<CheckoutView>("/checkout"),
     receipt: () => get<CheckoutReceipt>("/checkout/order"),
@@ -82,6 +83,17 @@ export const pageToken = (request: Request) =>
 /** The shop origin of this checkout origin (`checkout.demo.localhost` → `demo.localhost`). */
 export function shopUrl(url: URL): string {
   return `${url.protocol}//${url.host.replace(/^checkout\./, "")}/`;
+}
+
+/**
+ * Shop links of the account pages, which also render on the account origin
+ * (`<slug>.<account domain>`), where the request host says nothing about the shop.
+ */
+export function accountLinks(shop: ShopModel | null, url: URL) {
+  return {
+    shopUrl: shop?.locales.find((l) => l.locale === shop.locale)?.href ?? shopUrl(url),
+    withdrawUrl: shop ? `${shop.checkout_url}/withdraw` : "/withdraw",
+  };
 }
 
 /** Countries of the tenant's markets (`cs-CZ` → `CZ`), for address forms. */

@@ -387,6 +387,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/storefront/v1/customer/consent": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The signed-in customer's email preferences (account origin, A1, A20). */
+        get: operations["get_account_consent"];
+        put?: never;
+        /**
+         * Saves `email_marketing` and `review_invites` for the signed-in customer (source `account`;
+         *     a body `source` is ignored). Any other purpose is refused.
+         */
+        post: operations["post_account_consent"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/storefront/v1/customer/login": {
         parameters: {
             query?: never;
@@ -2306,6 +2327,11 @@ export interface components {
         };
         ShopModel: {
             /**
+             * @description The market's account origin (`https://<label>.<account domain>`, A1): sign-in and the
+             *     customer account.
+             */
+            account_url: string;
+            /**
              * @description `""` in the market's default locale, else `/<locale>` (spec §9.1). Page-model hrefs
              *     already carry it; themes prefix the links they build themselves (`/search`,
              *     `/p/<slug>`, `/_p/public/*`).
@@ -3686,6 +3712,90 @@ export interface operations {
                 };
             };
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    get_account_consent: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description The tenant's public storefront token. */
+                "X-Storefront-Token": string;
+                /** @description Market id resolved from the shop host by the edge. */
+                "X-Market": string;
+                /** @description Locale hint (one of the market's locales). */
+                "X-Locale"?: string | null;
+                /** @description Session token from the checkout origin's `__Host-sid` cookie (set by the edge). */
+                "X-Customer-Session": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsentState"];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    post_account_consent: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description The tenant's public storefront token. */
+                "X-Storefront-Token": string;
+                /** @description Market id resolved from the shop host by the edge. */
+                "X-Market": string;
+                /** @description Locale hint (one of the market's locales). */
+                "X-Locale"?: string | null;
+                /** @description Session token from the checkout origin's `__Host-sid` cookie (set by the edge). */
+                "X-Customer-Session": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsentChoice"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsentState"];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

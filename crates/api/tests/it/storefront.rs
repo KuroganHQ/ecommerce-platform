@@ -1056,3 +1056,16 @@ async fn hreflang_lists_only_markets_that_sell_the_product(db: PgPool) {
     .await;
     assert!(!sk.contains("tricko-sk"), "{sk}");
 }
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn page_model_has_account_url(db: PgPool) {
+    let c = setup(db).await;
+    let (status, shop) = c.get("/storefront/v1/shop").await;
+    assert_eq!(status, StatusCode::OK, "{shop}");
+    assert_eq!(shop["account_url"], "http://shop.accounts.localhost:8080");
+    let (status, sk, _) = sf(Call::get("/storefront/v1/shop"), &c.shop, c.shop.sk)
+        .send(&c.s)
+        .await;
+    assert_eq!(status, StatusCode::OK, "{sk}");
+    assert_eq!(sk["account_url"], "http://sk--shop.accounts.localhost:8080");
+}

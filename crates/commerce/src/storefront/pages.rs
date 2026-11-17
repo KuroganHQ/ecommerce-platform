@@ -116,6 +116,9 @@ pub struct ShopModel {
     /// The checkout origin (`https://checkout.<shop host>`, A1): account, order status and the
     /// withdrawal form (`/withdraw`, A19) live there, not on the theme's origin.
     pub checkout_url: String,
+    /// The market's account origin (`https://<label>.<account domain>`, A1): sign-in and the
+    /// customer account.
+    pub account_url: String,
     pub currencies: Vec<String>,
     /// The tenant's markets (other shops of the same merchant).
     pub markets: Vec<MarketLink>,
@@ -250,6 +253,7 @@ pub async fn shop(
         currency: ctx.market.currency.code().into(),
         base_path: ctx.base_path(),
         checkout_url: ctx.base_url.replacen("://", "://checkout.", 1),
+        account_url: ctx.account_url(""),
         locales: ctx
             .market
             .locales_default_first()

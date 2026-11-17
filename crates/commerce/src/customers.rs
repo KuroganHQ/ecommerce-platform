@@ -418,7 +418,7 @@ pub async fn request_magic_link(
             to: &email,
             locale: &locale,
             vars: json!({
-                "url": ctx.checkout_url(&format!("/account/verify?token={}", minted.token)),
+                "url": ctx.account_url(&format!("/account/verify?token={}", minted.token)),
                 "minutes": MAGIC_LINK_MINUTES,
             }),
             idempotency_key: format!("magic_link:{}", hex::encode(&minted.hash)),
@@ -652,7 +652,7 @@ pub async fn set_password(
             stream: Stream::Transactional,
             to: &c.email,
             locale: &c.locale,
-            vars: json!({ "url": ctx.checkout_url(DEFAULT_REDIRECT) }),
+            vars: json!({ "url": ctx.account_url(DEFAULT_REDIRECT) }),
             idempotency_key: format!(
                 "password_changed:{}:{}",
                 session.customer_id,

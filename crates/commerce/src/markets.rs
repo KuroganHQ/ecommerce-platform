@@ -176,6 +176,10 @@ pub async fn list(tx: &mut TenantTx) -> Result<Vec<Market>, Error> {
 pub async fn create(tx: &mut TenantTx, actor: &str, m: &NewMarket) -> Result<Market, Error> {
     m.validate()?;
     let tenant_id = tx.tenant_id();
+    let slug = sqlx::query_scalar!("SELECT slug FROM platform.tenants WHERE id = $1", tenant_id)
+        .fetch_one(&mut **tx)
+        .await?;
+    crate::tenancy::account_label(&slug, &m.code, m.is_default)?;
     if m.is_default {
         sqlx::query!("UPDATE markets SET is_default = false WHERE is_default")
             .execute(&mut **tx)

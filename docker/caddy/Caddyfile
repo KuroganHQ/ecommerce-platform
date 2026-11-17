@@ -71,7 +71,8 @@ http://admin.localhost {
 }
 
 # Everything else is a storefront host for the edge (WP2/WP6): <shop>.localhost,
-# checkout.<shop>.localhost (spec A1), preview-<rev>--<shop>.localhost. The edge resolves the
+# checkout.<shop>.localhost (spec A1), preview-<rev>--<shop>.localhost, and the account origins
+# <slug>.accounts.localhost / <market>--<slug>.accounts.localhost (ACCOUNT_DOMAIN, SHOP-95). The edge resolves the
 # tenant from Host and strips client-supplied X-Forwarded-*/X-Tenant headers itself (A2).
 # gzip matches how the §9.6 JS budget is defined (prod: Cloudflare compresses).
 :80 {

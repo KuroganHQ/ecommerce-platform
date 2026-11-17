@@ -247,6 +247,7 @@ async fn fork_build_preview_publish_rollback(db: PgPool) {
         &commerce::storefront::PublicUrls {
             scheme: "http".into(),
             port: Some(8080),
+            ..Default::default()
         },
         fork.id,
         now,

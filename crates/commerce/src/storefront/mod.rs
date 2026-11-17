@@ -57,6 +57,8 @@ pub struct PublicUrls {
     pub scheme: String,
     /// A non-default port, for local development (`8080`).
     pub port: Option<u16>,
+    /// The registrable domain of account origins (`ACCOUNT_DOMAIN`, A1).
+    pub account_domain: String,
 }
 
 impl PublicUrls {
@@ -73,6 +75,7 @@ impl Default for PublicUrls {
         Self {
             scheme: "https".into(),
             port: None,
+            account_domain: "accounts.localhost".into(),
         }
     }
 }
@@ -141,6 +144,8 @@ pub struct Context {
     pub markets: Vec<MarketCtx>,
     pub locale: String,
     pub base_url: String,
+    /// The market's account origin (A1): `<label>.<account domain>`.
+    pub account_base: String,
     pub now: DateTime<Utc>,
     /// The exact shop origin the edge served (`X-Shop-Origin`); `None` outside storefront
     /// requests, where checkout capability operations fail closed.
@@ -160,6 +165,11 @@ impl Context {
     /// A URL on the market's checkout origin (A1).
     pub fn checkout_url(&self, path: &str) -> String {
         format!("{}{path}", checkout_base(&self.base_url))
+    }
+
+    /// A URL on the market's account origin (A1).
+    pub fn account_url(&self, path: &str) -> String {
+        format!("{}{path}", self.account_base)
     }
 
     pub fn fmt_locale(&self) -> Locale {
@@ -258,23 +268,26 @@ pub async fn context(
         })?;
     // A market without a verified domain is not published: nothing is revealed about it.
     let base_url = market.base_url.clone().ok_or(Error::NotFound)?;
-    let shop_name = sqlx::query_scalar!(
-        "SELECT name FROM platform.tenants WHERE id = $1",
+    let tenant = sqlx::query!(
+        "SELECT name, slug FROM platform.tenants WHERE id = $1",
         tx.tenant_id()
     )
     .fetch_one(&mut **tx)
     .await?;
+    let label = crate::tenancy::account_host_label(&tenant.slug, &market.code, market.is_default);
+    let account_base = urls.base(&format!("{label}.{}", urls.account_domain));
     let locale = locale
         .filter(|l| market.locales.iter().any(|m| m == l))
         .unwrap_or(&market.default_locale)
         .to_owned();
     Ok(Context {
         tenant_id: tx.tenant_id(),
-        shop_name,
+        shop_name: tenant.name,
         market,
         markets,
         locale,
         base_url,
+        account_base,
         now,
         origin: None,
     })
@@ -437,6 +450,7 @@ mod tests {
             market: markets[0].clone(),
             locale: markets[0].default_locale.clone(),
             base_url: markets[0].base_url.clone().unwrap_or_default(),
+            account_base: "https://shop.accounts.example".into(),
             markets,
             now: Utc::now(),
             origin: None,
@@ -540,6 +554,7 @@ mod tests {
         let u = PublicUrls {
             scheme: "http".into(),
             port: Some(8080),
+            account_domain: "accounts.localhost".into(),
         };
         assert_eq!(u.base("demo.localhost"), "http://demo.localhost:8080");
         assert_eq!(PublicUrls::default().base("shop.cz"), "https://shop.cz");

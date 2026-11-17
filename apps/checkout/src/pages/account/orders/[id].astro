@@ -5,7 +5,7 @@ import OrderDocuments from "../../../components/OrderDocuments.astro";
 import WithdrawalHistory from "../../../components/WithdrawalHistory.astro";
 import WithdrawalForm from "../../../islands/WithdrawalForm";
 import Checkout from "../../../layouts/Checkout.astro";
-import { checkoutApi, messages, shopUrl } from "../../../lib/api";
+import { accountLinks, checkoutApi, messages } from "../../../lib/api";
 
 // One of the signed-in customer's orders (placed signed in, or linked after verification, A5).
 const api = checkoutApi(Astro.request);
@@ -24,7 +24,7 @@ Astro.response.headers.set("Cache-Control", "no-store");
 <Checkout
   title={order ? t(m, "order.title", { number: order.number }) : t(m, "account.orders")}
   shopName={shop?.name ?? ""}
-  shopUrl={shopUrl(Astro.url)}
+  {...accountLinks(shop, Astro.url)}
   lang={shop?.locale ?? "cs"}
   accountLabel={t(m, "account.nav")}
   withdrawalLabel={t(m, "withdraw.title")}
