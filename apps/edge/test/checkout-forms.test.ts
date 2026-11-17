@@ -97,9 +97,9 @@ async function expectStale(res: Response) {
   expectPlatformHeaders(res, "stale page");
 }
 
-async function expectRotated(res: Response) {
+async function expectRotated(res: Response, location = "/checkout") {
   expect(res.status).toBe(303);
-  expect(res.headers.get("location")).toBe("/checkout");
+  expect(res.headers.get("location")).toBe(location);
   expect(await res.text()).toBe("");
   expect(res.headers.getSetCookie(), "exactly one HttpOnly capability cookie").toEqual([
     ROTATED_COOKIE,
@@ -459,6 +459,7 @@ describe("the API answer becomes a redirect back to the checkout, never forwarde
 
 describe("the place-order form places through the edge and answers by navigation (C4, C6, C7)", () => {
   const ROUTE = "/checkout/place-order";
+  const PLACED_ID = "0b2a3f1e-6c4d-4e8a-9b1c-2d3e4f5a6b7c";
   const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
   const CONSENT_ID = "0123456789abcdef0123456789abcdef";
   const placeForm = (fields: [string, string][]) =>
@@ -489,7 +490,7 @@ describe("the place-order form places through the edge and answers by navigation
     (headers: Record<string, string> = { "x-cart-token": NEW_CAP }) =>
     () =>
       Response.json(
-        { order_id: "o1", number: "100001", confirmation_url: `/o/${"a".repeat(64)}` },
+        { order_id: PLACED_ID, number: "100001", confirmation_url: `/o/${"a".repeat(64)}` },
         { status: 201, headers },
       );
 
@@ -509,7 +510,7 @@ describe("the place-order form places through the edge and answers by navigation
         "x-cart-token": NEW_CAP,
       }),
     );
-    await expectRotated(res);
+    await expectRotated(res, `/o/${PLACED_ID}`);
     expect(api.calls, "one API call").toHaveLength(1);
     const [call] = placeCalls();
     expect(call?.method).toBe("POST");
@@ -587,21 +588,29 @@ describe("the place-order form places through the edge and answers by navigation
   });
 
   test.each([
-    ["201 without a capability", placed({})],
-    ["201 with a malformed capability", placed({ "x-cart-token": "short" })],
-    ["404", () => problem(404, "not_found")],
-    ["409 order_already_placed", () => problem(409, "order_already_placed")],
-  ])("%s answers 303 /checkout without a cookie", async (_, answer) => {
-    answers[PLACE_ORDER_API] = answer;
-    const res = await post(ROUTE, PLACE);
-    expect(res.status).toBe(303);
-    expect(res.headers.get("location")).toBe("/checkout");
-    expect(await res.text(), "the API's answer stays at the edge").toBe("");
-    expect(res.headers.getSetCookie()).toEqual([]);
-    expect(res.headers.get("x-cart-token")).toBeNull();
-    expect(placeCalls()).toHaveLength(1);
-    expectPlatformHeaders(res, "303");
-  });
+    ["201 without a capability", placed({}), `/o/${PLACED_ID}`],
+    ["201 with a malformed capability", placed({ "x-cart-token": "short" }), `/o/${PLACED_ID}`],
+    [
+      "201 with an order id that is not a UUID",
+      () => Response.json({ order_id: "//evil.example" }, { status: 201 }),
+      "/checkout",
+    ],
+    ["404", () => problem(404, "not_found"), "/checkout"],
+    ["409 order_already_placed", () => problem(409, "order_already_placed"), "/checkout"],
+  ] as [string, () => Response, string][])(
+    "%s answers 303 without a cookie",
+    async (_, answer, location) => {
+      answers[PLACE_ORDER_API] = answer;
+      const res = await post(ROUTE, PLACE);
+      expect(res.status).toBe(303);
+      expect(res.headers.get("location")).toBe(location);
+      expect(await res.text(), "the API's answer stays at the edge").toBe("");
+      expect(res.headers.getSetCookie()).toEqual([]);
+      expect(res.headers.get("x-cart-token")).toBeNull();
+      expect(placeCalls()).toHaveLength(1);
+      expectPlatformHeaders(res, "303");
+    },
+  );
 
   test.each([
     ["409 cart_changed", () => problem(409, "cart_changed"), 409, "cart_changed"],

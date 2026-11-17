@@ -136,7 +136,8 @@ export const CHECKOUT_OPERATIONS: Operation[] = [
   { method: "GET", path: /^\/checkout\/order$/ },
   { method: "GET", path: /^\/checkout\/saved-addresses$/ },
   { method: "GET", path: /^\/orders\/[0-9a-f]{64}$/ },
-  { method: "GET", path: /^\/link-grants\/orders\/[0-9a-f-]{36}$/ },
+  { method: "GET", path: /^\/orders\/[0-9a-f-]{36}$/ },
+  { method: "GET", path: /^\/orders\/[0-9a-f-]{36}\/documents$/ },
   { method: "GET", path: /^\/customer\/orders$/ },
   { method: "GET", path: /^\/customer\/orders\/[0-9a-f-]{36}$/ },
   // WP18: the newsletter confirmation and preference pages (token in the query).

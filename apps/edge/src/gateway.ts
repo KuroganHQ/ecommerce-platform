@@ -67,6 +67,7 @@ import {
   CLIENT_PAGE_TOKEN_HEADER,
   pageToken,
   verifyPageToken,
+  WORKER_GRANT_PAGE_TOKEN_HEADER,
   WORKER_PAGE_TOKEN_HEADER,
 } from "./page-token.ts";
 import {
@@ -205,6 +206,17 @@ const ORDER_OPS: { method: string; path: RegExp }[] = [
   { method: "POST", path: /^\/[0-9a-f]{64}\/payment-attempts\/[0-9a-f-]{36}\/init$/ },
   // WP11: the Stripe test simulator (the API answers 404 unless it runs without a real key).
   { method: "POST", path: /^\/[0-9a-f]{64}\/payment-attempts\/[0-9a-f-]{36}\/simulate$/ },
+];
+
+const ORDER_ID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
+const ATTEMPT = "[0-9a-f-]{36}";
+/** The clean order page's operations (`/_p/orders/<order id>/*`, C4). */
+const SAME_ORIGIN_ORDER_OPS: { method: string; path: RegExp }[] = [
+  { method: "GET", path: new RegExp(`^/${ORDER_ID}$`) },
+  { method: "GET", path: new RegExp(`^/${ORDER_ID}/payment$`) },
+  { method: "POST", path: new RegExp(`^/${ORDER_ID}/payment-attempts$`) },
+  { method: "POST", path: new RegExp(`^/${ORDER_ID}/payment-attempts/${ATTEMPT}/init$`) },
+  { method: "POST", path: new RegExp(`^/${ORDER_ID}/payment-attempts/${ATTEMPT}/simulate$`) },
 ];
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -485,6 +497,7 @@ export function createGateway(opts: GatewayOptions) {
       scope?: string;
       experiment?: Assignment | undefined;
       pageToken?: string | undefined;
+      grantPageToken?: string | undefined;
       linkGrant?: string | undefined;
       form?: URLSearchParams | undefined;
     } = {},
@@ -500,6 +513,7 @@ export function createGateway(opts: GatewayOptions) {
       const headers = workerRequestHeaders();
       headers.set(CTX_HEADER, ctxId);
       if (extra.pageToken) headers.set(WORKER_PAGE_TOKEN_HEADER, extra.pageToken);
+      if (extra.grantPageToken) headers.set(WORKER_GRANT_PAGE_TOKEN_HEADER, extra.grantPageToken);
       if (extra.experiment && site.experiment)
         headers.set(ARM_HEADER, `${site.experiment.name}:${extra.experiment.arm}`);
       if (extra.form) {
@@ -844,7 +858,7 @@ export function createGateway(opts: GatewayOptions) {
     host: string,
     port: string,
     clientIp: string | undefined,
-    cart: string | undefined,
+    credential: Record<string, string>,
   ): Promise<Response> {
     if (!ops.some((o) => o.method === req.method && o.path.test(rest)))
       return problem(404, "not_found", "unknown checkout operation");
@@ -866,7 +880,7 @@ export function createGateway(opts: GatewayOptions) {
         method: req.method,
         headers: apiHeaders(site, {
           ...(body ? { "content-type": "application/json" } : {}),
-          ...(cart ? { "x-cart-token": cart } : {}),
+          ...credential,
           ...consentSubject(req),
           ...(clientIp ? { "x-client-ip": clientIp } : {}),
           ...(key ? { "idempotency-key": key } : {}),
@@ -897,20 +911,33 @@ export function createGateway(opts: GatewayOptions) {
     req: Request,
     url: URL,
     attempt: string,
-    host: string,
-    port: string,
+    from: { host: string; port: string } | SameOriginSite,
   ): Promise<Response> {
     if (!UUID_RE.test(attempt)) return text(404, "Not found");
+    const shop = "shopOrigin" in from && sameOriginShop(from) ? from : null;
     const api = `${opts.apiOrigin}/storefront/v1/checkout/fake-pay/${attempt}`;
-    const cart = capabilityCookie(req, CHECKOUT_CART_COOKIE);
+    const cart = capabilityCookie(req, shop ? SAME_ORIGIN_CART_COOKIE : CHECKOUT_CART_COOKIE);
+    if (shop && !cart)
+      return new Response(null, { status: 403, headers: { "cache-control": "no-store" } });
     const payer: Record<string, string> = cart ? { "x-cart-token": cart } : {};
     const ret = url.searchParams.get("return") ?? "";
-    const back = ORDER_PAGE_RE.test(ret) ? ret : "/";
+    const back = (shop ? isOrderPage(ret) : ORDER_PAGE_RE.test(ret)) ? ret : "/";
+    const token = shop ? pageToken(opts.pageTokenSecret, shop.shopOrigin, cart) : undefined;
     if (req.method === "POST") {
-      if (!sameOrigin(req, host, port)) return problem(403, "cross_origin", "cross-origin request");
-      const raw = await readCapped(req.body, MAX_JSON_BODY).catch(() => null);
-      if (!raw) return problem(413, "payload_too_large", `body over ${MAX_JSON_BODY} bytes`);
-      const outcome = new URLSearchParams(new TextDecoder().decode(raw)).get("outcome");
+      let outcome: string | null;
+      if (shop) {
+        const form = await navigationForm(shop, req);
+        if (form instanceof Response) return form;
+        if (!verifyPageToken(opts.pageTokenSecret, shop.shopOrigin, cart, form.get("_pt")))
+          return new Response(null, { status: 403, headers: { "cache-control": "no-store" } });
+        outcome = form.get("outcome");
+      } else {
+        if (!("host" in from) || !sameOrigin(req, from.host, from.port))
+          return problem(403, "cross_origin", "cross-origin request");
+        const raw = await readCapped(req.body, MAX_JSON_BODY).catch(() => null);
+        if (!raw) return problem(413, "payload_too_large", `body over ${MAX_JSON_BODY} bytes`);
+        outcome = new URLSearchParams(new TextDecoder().decode(raw)).get("outcome");
+      }
       if (outcome !== "succeeded" && outcome !== "failed")
         return problem(400, "invalid_outcome", "outcome must be succeeded or failed");
       const res = await upstream(
@@ -952,7 +979,7 @@ export function createGateway(opts: GatewayOptions) {
 <p>Order <strong>${esc(p.order_number)}</strong>: <strong>${esc(p.amount?.formatted)}</strong></p>
 ${
   pending
-    ? `<form method="post" action="${esc(action)}"><button class="ok" name="outcome" value="succeeded">Pay</button><button name="outcome" value="failed">Fail the payment</button></form>`
+    ? `<form method="post" action="${esc(action)}">${token ? `<input type="hidden" name="_pt" value="${esc(token)}">` : ""}<button class="ok" name="outcome" value="succeeded">Pay</button><button name="outcome" value="failed">Fail the payment</button></form>`
     : `<p role="status">This payment is ${esc(p.status)}.</p><p><a href="${esc(back)}">Back to the order</a></p>`
 }</main></html>`;
     return new Response(req.method === "HEAD" ? null : html, {
@@ -1348,14 +1375,58 @@ ${
     const rotated = res.headers.get("x-cart-token");
     const refused = res.status === 409 || res.status === 422;
     const code = refused ? await refusalCode(res) : "failed";
+    const placed =
+      res.status === 201
+        ? ((await res.json().catch(() => null)) as { order_id?: unknown } | null)
+        : null;
     await res.body?.cancel().catch(() => undefined);
     if (res.status === 201)
-      return toCheckout(
-        rotated && TOKEN_RE.test(rotated) ? { "set-cookie": sameOriginCartCookie(rotated) } : {},
-      );
+      return new Response(null, {
+        status: 303,
+        headers: {
+          location: cleanUrl({ kind: "order", id: placed?.order_id }) ?? "/checkout",
+          ...(rotated && TOKEN_RE.test(rotated)
+            ? { "set-cookie": sameOriginCartCookie(rotated) }
+            : {}),
+        },
+      });
     if (res.status === 404 || (res.status === 409 && code === "order_already_placed"))
       return toCheckout();
     return draftPage(site, req, `error=${code}`, form, refused ? res.status : 502);
+  }
+
+  async function sameOriginOrderApi(
+    site: SameOriginSite,
+    req: Request,
+    rest: string,
+    host: string,
+    port: string,
+    clientIp: string | undefined,
+  ): Promise<Response> {
+    const presented = req.headers.get(CLIENT_PAGE_TOKEN_HEADER);
+    const holds = (capability: string | undefined) =>
+      verifyPageToken(opts.pageTokenSecret, site.shopOrigin, capability, presented);
+    const cart = capabilityCookie(req, SAME_ORIGIN_CART_COOKIE);
+    const grant = capabilityCookie(req, LINK_GRANT_COOKIE);
+    const credential: Record<string, string> | null =
+      cart && holds(cart)
+        ? { "x-cart-token": cart }
+        : grant && holds(grant)
+          ? { [LINK_GRANT_HEADER]: grant }
+          : null;
+    if (!credential)
+      return new Response(null, { status: 403, headers: { "cache-control": "no-store" } });
+    return checkoutProxy(
+      site,
+      req,
+      "/orders",
+      rest,
+      SAME_ORIGIN_ORDER_OPS,
+      host,
+      port,
+      clientIp,
+      credential,
+    );
   }
 
   async function sameOriginCheckoutApi(
@@ -1379,7 +1450,7 @@ ${
       host,
       port,
       clientIp,
-      cart,
+      cart ? { "x-cart-token": cart } : {},
     );
   }
 
@@ -1858,6 +1929,8 @@ ${
         ? exchangeLink(site, req, ingress.link)
         : seeOther(ingress.location);
     }
+    if (url.pathname.startsWith("/_p/fake-pay/"))
+      return fakePay(site, req, url, url.pathname.slice("/_p/fake-pay/".length), site);
     if (url.pathname === REOPEN_LINK_PATH) return reopenLink();
     if (isOrderPage(url.pathname)) return orderPage(site, req, url);
     if (url.pathname === PLACE_ORDER_FORM) return placeOrder(site, req);
@@ -1905,8 +1978,14 @@ ${
     if (req.method !== "GET" && req.method !== "HEAD")
       return text(405, "Method not allowed", { allow: "GET, HEAD" });
     const linkGrant = capabilityCookie(req, LINK_GRANT_COOKIE);
-    if (!linkGrant) return reopenLink();
-    return renderPlatform(site, req, url, { linkGrant });
+    const cartToken = capabilityCookie(req, SAME_ORIGIN_CART_COOKIE);
+    if (!linkGrant && !cartToken) return reopenLink();
+    return renderPlatform(site, req, url, {
+      linkGrant,
+      cartToken,
+      pageToken: pageToken(opts.pageTokenSecret, site.shopOrigin, cartToken),
+      grantPageToken: pageToken(opts.pageTokenSecret, site.shopOrigin, linkGrant),
+    });
   }
 
   function renderCheckout(
@@ -1987,7 +2066,10 @@ ${
     if (legacy) return legacy;
     const sameOrigin = sameOriginShop(site);
     if (sameOrigin) {
-      if (isPlatformPagePath(p)) return platformPage(site, req, url);
+      if (isPlatformPagePath(p) || p.startsWith("/_p/fake-pay/"))
+        return platformPage(site, req, url);
+      if (p.startsWith("/_p/orders/"))
+        return sameOriginOrderApi(site, req, p.slice("/_p/orders".length), host, port, clientIp);
       if (p.startsWith("/_checkout/")) return checkoutAsset(site, req, p);
       if (p === "/_p/tokens.css") return tokensCss(site);
       if (p === "/_p/checkout" || (p.startsWith("/_p/checkout/") && p !== "/_p/checkout/start"))
@@ -2107,7 +2189,8 @@ ${
     const p = url.pathname;
     const legacy = legacyAccountRedirect(site, url);
     if (legacy) return legacy;
-    const cart = capabilityCookie(req, CHECKOUT_CART_COOKIE);
+    const cartCookie = capabilityCookie(req, CHECKOUT_CART_COOKIE);
+    const cart: Record<string, string> = cartCookie ? { "x-cart-token": cartCookie } : {};
     if (p === "/_p/withdraw" || p.startsWith("/_p/withdraw/")) {
       const rest = p.slice("/_p/withdraw".length);
       return checkoutProxy(
@@ -2131,7 +2214,7 @@ ${
       return checkoutProxy(site, req, "/orders", rest, ORDER_OPS, host, port, clientIp, cart);
     }
     if (p.startsWith("/_p/fake-pay/"))
-      return fakePay(site, req, url, p.slice("/_p/fake-pay/".length), host, port);
+      return fakePay(site, req, url, p.slice("/_p/fake-pay/".length), { host, port });
     if (p === "/_p/consent") return consentProxy(site, req, host, port, clientIp);
     if (p === "/_p/reviews") return reviewSubmit(site, req, host, port);
     if (
@@ -2215,7 +2298,7 @@ ${
     if (m.kind !== "checkout") throw new Error(`artifact ${checkoutArtifact} is not a checkout`);
     const consentSubject = readCookie(req.headers, CONSENT_ID_COOKIE);
     const r = await render(checkoutArtifact, normalizeUrl(url), site, {
-      cartToken: cart,
+      cartToken: cartCookie,
       consentSubject:
         consentSubject && CONSENT_ID_RE.test(consentSubject) ? consentSubject : undefined,
     });

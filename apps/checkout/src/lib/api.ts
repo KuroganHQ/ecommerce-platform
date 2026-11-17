@@ -39,12 +39,8 @@ export function checkoutApi(request: Request) {
     receipt: () => get<CheckoutReceipt>("/checkout/order"),
     savedAddresses: async () =>
       (await get<{ items: Address[] }>("/checkout/saved-addresses"))?.items ?? [],
-    order: (token: string) =>
-      /^[0-9a-f]{64}$/.test(token)
-        ? get<Order>(`/orders/${token}`)
-        : /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(token)
-          ? get<Order>(`/link-grants/orders/${token}`)
-          : Promise.resolve(null),
+    order: (ref: string) =>
+      ORDER_REF.test(ref) ? get<Order>(`/orders/${ref}`) : Promise.resolve(null),
     orders: async () => (await get<OrderPage>("/customer/orders"))?.items ?? [],
     customerOrder: (id: string) =>
       /^[0-9a-f-]{36}$/.test(id) ? get<Order>(`/customer/orders/${id}`) : Promise.resolve(null),
@@ -70,10 +66,8 @@ export function checkoutApi(request: Request) {
       /^[0-9a-f-]{36}$/.test(id)
         ? get<WithdrawalForm>(`/customer/orders/${id}/withdrawal`)
         : Promise.resolve(null),
-    orderDocuments: (token: string) =>
-      /^[0-9a-f]{64}$/.test(token)
-        ? get<DocumentLinks>(`/orders/${token}/documents`)
-        : Promise.resolve(null),
+    orderDocuments: (ref: string) =>
+      ORDER_REF.test(ref) ? get<DocumentLinks>(`/orders/${ref}/documents`) : Promise.resolve(null),
     myDocuments: (id: string) =>
       /^[0-9a-f-]{36}$/.test(id)
         ? get<DocumentLinks>(`/customer/orders/${id}/documents`)
@@ -82,9 +76,15 @@ export function checkoutApi(request: Request) {
 }
 
 const TOKEN = /^[0-9a-f]{64}$/;
+/** An order capability token, or the order id of a same-origin shop's clean order page. */
+const ORDER_REF = /^(?:[0-9a-f]{64}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/;
 
 export const pageToken = (request: Request) =>
   request.headers.get("x-platform-page-token") ?? undefined;
+
+/** The page token of the link grant cookie (the clean order page read by its grant). */
+export const grantPageToken = (request: Request) =>
+  request.headers.get("x-platform-grant-page-token") ?? undefined;
 
 /** The shop origin of this checkout origin (`checkout.demo.localhost` → `demo.localhost`). */
 export function shopUrl(url: URL): string {

@@ -7,8 +7,9 @@ function page(token: string | null) {
       selector === 'meta[name="page-token"]' && token !== null ? { content: token } : null,
   });
   const assign = vi.fn();
-  vi.stubGlobal("location", { assign });
-  return assign;
+  const reload = vi.fn();
+  vi.stubGlobal("location", { assign, reload });
+  return Object.assign(assign, { reload });
 }
 
 function answer(status: number) {
@@ -48,6 +49,18 @@ test.each(
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(assign.mock.calls).toEqual([["/checkout?error=stale_page"]]);
+    expect(r).toEqual({ ok: false, status, data: null, code: "stale_page" });
+  },
+);
+
+test.each([403, 404])(
+  "an order page call refused with %i reloads the order page, never the checkout",
+  async (status) => {
+    const assign = page("page-token");
+    answer(status);
+    const r = await call("GET", "/_p/orders/12345678-1234-1234-1234-123456789abc/payment");
+    expect(assign).not.toHaveBeenCalled();
+    expect(assign.reload).toHaveBeenCalledTimes(1);
     expect(r).toEqual({ ok: false, status, data: null, code: "stale_page" });
   },
 );

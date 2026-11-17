@@ -5,14 +5,22 @@ import OrderDetails from "../../components/OrderDetails.astro";
 import OrderDocuments from "../../components/OrderDocuments.astro";
 import PaymentStatus from "../../islands/PaymentStatus";
 import Checkout from "../../layouts/Checkout.astro";
-import { checkoutApi, messages, shopUrl } from "../../lib/api";
+import { checkoutApi, grantPageToken, messages, pageToken, shopUrl } from "../../lib/api";
 
-// The order page (A4): the order capability token is the only credential, read-only, 90 days.
+// The order page (A4): on the checkout origin the order capability token in the path is the
+// only credential, read-only, 90 days. On a same-origin shop the path holds the order id and
+// the edge passes the link grant and the checkout capability (C4/C5): the page's calls carry
+// the token of the one that may pay, else the grant's.
 const api = checkoutApi(Astro.request);
-const token = Astro.params.token ?? "";
-const [shop, order] = await Promise.all([api.shop(), api.order(token)]);
+const ref = Astro.params.token ?? "";
+const [shop, order] = await Promise.all([api.shop(), api.order(ref)]);
 const m = shop?.messages ?? {};
-const documents = order ? await api.orderDocuments(token) : null;
+const documents = order ? await api.orderDocuments(ref) : null;
+const token = order
+  ? order.payment.can_pay
+    ? pageToken(Astro.request)
+    : grantPageToken(Astro.request)
+  : undefined;
 Astro.response.headers.set("Cache-Control", "no-store");
 if (!order) Astro.response.status = 404;
 // The edge sends `Referrer-Policy: no-referrer` for /o/*: the token never leaks through Referer.
@@ -43,6 +51,7 @@ const due = order?.payment.expires_at
   accountUrl={shop?.account_url}
   withdrawalLabel={t(m, "withdraw.title")}
   wide
+  pageToken={token}
 >
   {
     !order ? (
@@ -66,7 +75,7 @@ const due = order?.payment.expires_at
           <PaymentStatus
             client:load
             m={messages(m, "order.", "checkout.error")}
-            token={token}
+            order={ref}
             initial={order.payment}
           />
         </section>
