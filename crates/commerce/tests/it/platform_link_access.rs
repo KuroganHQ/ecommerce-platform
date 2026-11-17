@@ -33,14 +33,14 @@ impl At {
 
     async fn authorize(&self, runtime: &PgPool, grant: &str, scope: Scope) -> Result<(), Error> {
         self.run(runtime, async |tx, ctx| {
-            link_access::authorize(tx, ctx, grant, scope).await.map(|_| ())
+            link_access::authorize(tx, ctx, grant, scope).await
         })
         .await
     }
 
     async fn complete(&self, runtime: &PgPool, grant: &str, scope: Scope) -> Result<(), Error> {
         self.run(runtime, async |tx, ctx| {
-            link_access::complete(tx, ctx, grant, scope).await.map(|_| ())
+            link_access::complete(tx, ctx, grant, scope).await
         })
         .await
     }
@@ -709,8 +709,7 @@ async fn shipped_withdrawal_link(runtime: &PgPool, shop: &Shop) -> (Uuid, String
 
 async fn review_link(runtime: &PgPool, shop: &Shop) -> (Uuid, String) {
     let order =
-        testkit::storefront::raw_order(runtime, shop, shop.cz, "CZK", 10_000, 1, "delivered")
-            .await;
+        testkit::storefront::raw_order(runtime, shop, shop.cz, "CZK", 10_000, 1, "delivered").await;
     let mut tx = tenant_tx(runtime, shop.tenant).await.unwrap();
     let issued = reviews::issue_tokens(&mut tx, order, chrono::Utc::now())
         .await
@@ -754,7 +753,11 @@ async fn withdrawal_grant_cannot_read_order(db: PgPool) {
         .await
         .expect("a withdrawal link exchanges for a grant");
     assert_eq!(scope, Scope::Withdrawal);
-    for other in [Scope::OrderRead(order), Scope::WithdrawalRequest, Scope::Review] {
+    for other in [
+        Scope::OrderRead(order),
+        Scope::WithdrawalRequest,
+        Scope::Review,
+    ] {
         assert!(
             not_found(&at.authorize(&runtime, &grant, other).await),
             "a withdrawal grant does not allow {other:?}"
@@ -858,9 +861,11 @@ async fn review_grant_cannot_submit_other_line(db: PgPool) {
         ),
         "the grant was single use"
     );
-    at.run(&runtime, async |tx, _| reviews::invitation(tx, &link_b).await)
-        .await
-        .expect("the other line's link is untouched");
+    at.run(&runtime, async |tx, _| {
+        reviews::invitation(tx, &link_b).await
+    })
+    .await
+    .expect("the other line's link is untouched");
     let used: bool = scalar(
         &runtime,
         shop.tenant,

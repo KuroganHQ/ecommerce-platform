@@ -237,15 +237,12 @@ async fn invitation_by_link(tx: &mut TenantTx, link: &[u8]) -> Result<ReviewInvi
     })
 }
 
-/// The invitation behind a review grant (decision C5); reading consumes nothing.
 pub async fn invitation_by_grant(
     tx: &mut TenantTx,
     ctx: &Context,
     grant: &str,
 ) -> Result<ReviewInvitation, Error> {
-    let link = link_access::authorize(tx, ctx, grant, Scope::Review)
-        .await?
-        .ok_or(Error::NotFound)?;
+    let link = link_access::read_link(tx, ctx, grant, Scope::Review).await?;
     invitation_by_link(tx, &link).await
 }
 
@@ -378,8 +375,6 @@ pub async fn submit(
     record(tx, ctx, &capability::hash(&input.token), clean, ip_hash).await
 }
 
-/// Submits with a review grant: consumes its link and revokes the grant in the caller's
-/// transaction, so a refused review keeps both.
 pub async fn submit_by_grant(
     tx: &mut TenantTx,
     ctx: &Context,
@@ -387,9 +382,7 @@ pub async fn submit_by_grant(
     text: &ReviewText,
     ip_hash: Option<&[u8]>,
 ) -> Result<Uuid, Error> {
-    let link = link_access::complete(tx, ctx, grant, Scope::Review)
-        .await?
-        .ok_or(Error::NotFound)?;
+    let link = link_access::complete_link(tx, ctx, grant, Scope::Review).await?;
     let clean = validate(text.rating, &text.name, &text.title, &text.body)?;
     record(tx, ctx, &link, clean, ip_hash).await
 }

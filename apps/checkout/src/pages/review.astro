@@ -6,8 +6,7 @@ import { Button, controlClass } from "../ui.tsx";
 
 // Review form (WP16), reached through a review link (one per delivered order line, single
 // use). A plain POST form, no JS: `/_p/reviews` submits it and 303s back here with `done=1`,
-// or with the token and an `error` code when the link still works. On a same-origin shop the
-// link is a grant cookie and the form posts its page token to `/review` instead.
+// or with the token and an `error` code when the link still works.
 const api = checkoutApi(Astro.request);
 const token = Astro.url.searchParams.get("token") ?? "";
 const pageToken = grantPageToken(Astro.request);

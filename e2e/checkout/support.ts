@@ -361,7 +361,6 @@ export async function mail(to: string, subject: string): Promise<{ Text: string;
 
 export const CLEAN_ORDER = /\/o\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/;
 
-/** A placed cash-on-delivery order on the same-origin shop; the page ends on its clean URL. */
 export async function sameOriginOrder(page: Page, email: string): Promise<string> {
   await sameOriginReview(page, FRESH_HTTPS, email);
   await chooseCashOnDelivery(page);
@@ -370,7 +369,6 @@ export async function sameOriginOrder(page: Page, email: string): Promise<string
   return CLEAN_ORDER.exec(new URL(page.url()).pathname)?.[1] ?? "";
 }
 
-/** What the tab's history, referrer and page source still hold. */
 export const historyTraces = (page: Page) =>
   page.evaluate(() => {
     const nav = (window as unknown as { navigation?: { entries(): { url: string | null }[] } })
@@ -382,7 +380,6 @@ export const historyTraces = (page: Page) =>
     };
   });
 
-/** Theme script on a shop page: requests with the shop's cookies, no page token. */
 export const themeRequests = (page: Page, requests: [string, string][]) =>
   page.evaluate(
     async (list) =>

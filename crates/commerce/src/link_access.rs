@@ -23,9 +23,7 @@ pub enum Scope {
     OrderRead(Uuid),
     /// The public withdrawal form (decision default 8): one emailed-link request, no reads.
     WithdrawalRequest,
-    /// An emailed withdrawal link: its order's withdrawal form and one declaration.
     Withdrawal,
-    /// An emailed review link: its order line's invitation and one review.
     Review,
 }
 
@@ -81,7 +79,12 @@ pub async fn exchange(
             .fetch_optional(&mut **tx)
             .await?
             .ok_or(Error::NotFound)?;
-            (Scope::OrderRead(row.order_id), Some(hash), None, row.expires_at)
+            (
+                Scope::OrderRead(row.order_id),
+                Some(hash),
+                None,
+                row.expires_at,
+            )
         }
         Source::WithdrawalForm => (
             Scope::WithdrawalRequest,
@@ -149,10 +152,46 @@ pub async fn exchange(
 }
 
 /// Checks `grant` for exactly `scope` on this origin and generation, locking it until commit,
-/// and refreshes its idle expiry. Anything else is `404` and refreshes nothing. For
-/// [`Scope::Withdrawal`] and [`Scope::Review`] it returns the hash of the emailed link, which
-/// the caller checks is still unused.
+/// and refreshes its idle expiry. Anything else is `404` and refreshes nothing.
 pub async fn authorize(
+    tx: &mut TenantTx,
+    ctx: &Context,
+    grant: &str,
+    scope: Scope,
+) -> Result<(), Error> {
+    refresh(tx, ctx, grant, scope).await.map(drop)
+}
+
+/// As [`authorize`], but revokes the grant: the single-use action it allows completes in the
+/// caller's transaction, so a rollback keeps the grant.
+pub async fn complete(
+    tx: &mut TenantTx,
+    ctx: &Context,
+    grant: &str,
+    scope: Scope,
+) -> Result<(), Error> {
+    revoke(tx, ctx, grant, scope).await.map(drop)
+}
+
+pub async fn read_link(
+    tx: &mut TenantTx,
+    ctx: &Context,
+    grant: &str,
+    scope: Scope,
+) -> Result<Vec<u8>, Error> {
+    refresh(tx, ctx, grant, scope).await?.ok_or(Error::NotFound)
+}
+
+pub async fn complete_link(
+    tx: &mut TenantTx,
+    ctx: &Context,
+    grant: &str,
+    scope: Scope,
+) -> Result<Vec<u8>, Error> {
+    revoke(tx, ctx, grant, scope).await?.ok_or(Error::NotFound)
+}
+
+async fn refresh(
     tx: &mut TenantTx,
     ctx: &Context,
     grant: &str,
@@ -178,9 +217,7 @@ pub async fn authorize(
     .ok_or(Error::NotFound)
 }
 
-/// As [`authorize`], but revokes the grant: the single-use action it allows completes in the
-/// caller's transaction, so a rollback keeps the grant.
-pub async fn complete(
+async fn revoke(
     tx: &mut TenantTx,
     ctx: &Context,
     grant: &str,

@@ -249,30 +249,23 @@ pub async fn request_link(
     Ok(())
 }
 
-/// The withdrawal form behind a withdrawal grant (decision C5); reading consumes nothing.
 pub async fn form_by_grant(
     tx: &mut TenantTx,
     ctx: &Context,
     grant: &str,
 ) -> Result<WithdrawalForm, Error> {
-    let link = link_access::authorize(tx, ctx, grant, Scope::Withdrawal)
-        .await?
-        .ok_or(Error::NotFound)?;
+    let link = link_access::read_link(tx, ctx, grant, Scope::Withdrawal).await?;
     let order = order_by_link(tx, &link).await?;
     form(tx, order).await
 }
 
-/// Declares with a withdrawal grant: consumes its link and revokes the grant in the caller's
-/// transaction, so a refused declaration keeps both.
 pub async fn declare_by_grant(
     tx: &mut TenantTx,
     ctx: &Context,
     grant: &str,
     input: &DeclareInput,
 ) -> Result<WithdrawalReceipt, Error> {
-    let link = link_access::complete(tx, ctx, grant, Scope::Withdrawal)
-        .await?
-        .ok_or(Error::NotFound)?;
+    let link = link_access::complete_link(tx, ctx, grant, Scope::Withdrawal).await?;
     let order = consume_link(tx, &link).await?;
     declare(tx, ctx, order, input, "web").await
 }
