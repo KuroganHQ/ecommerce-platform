@@ -5,7 +5,7 @@ import path from "node:path";
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "vitest";
 import { createGateway, type Gateway } from "../src/gateway.ts";
 import { StaticResolver } from "../src/sites.ts";
-import { buildArtifact, fakeApi, platformCheckoutWorker, site } from "./fixtures.ts";
+import { buildArtifact, fakeApi, hostileTheme, platformCheckoutWorker, site } from "./fixtures.ts";
 
 const SECRET = "test-page-token-secret-0123456789abcdef";
 const FRESH = "http://fresh.localhost:8280";
@@ -89,6 +89,9 @@ beforeAll(async () => {
   const checkout = await buildArtifact(artifactRoot, "checkout", platformCheckoutWorker, {
     "_checkout/0123456789abcdef/app.js": "",
   });
+  const theme = await buildArtifact(artifactRoot, "theme", hostileTheme("id"), {
+    "_astro/app.id.js": "1",
+  });
   const sameOrigin = (host: string, origin: string, over = {}) =>
     site({
       tenant_id: `t-${host}`,
@@ -102,7 +105,17 @@ beforeAll(async () => {
     artifactRoot,
     checkoutArtifact: checkout.id,
     resolver: new StaticResolver({
-      "fresh.localhost": sameOrigin("fresh", FRESH, { account_host: "fresh.accounts.localhost" }),
+      "fresh.localhost": sameOrigin("fresh", FRESH, {
+        account_host: "fresh.accounts.localhost",
+        theme_artifact: theme.id,
+      }),
+      "iso.localhost": site({
+        tenant_id: "t-iso",
+        shop_host: "iso.localhost",
+        account_host: "iso.accounts.localhost",
+        theme_artifact: theme.id,
+        checkout_artifact: checkout.id,
+      }),
       "bare.localhost": sameOrigin("bare", BARE),
     }),
     apiOrigin: "http://api.test",
@@ -343,5 +356,34 @@ describe("the checkout page may send its sign-in form to the account origin only
 
   test("without one", async () => {
     expect(formAction(await page(BARE))).toBe("form-action 'self'");
+  });
+
+  const csp = async (url: string, headers: Record<string, string> = {}) => {
+    const res = await gw.fetch(
+      new Request(url, {
+        headers: {
+          host: new URL(url).host,
+          "sec-fetch-mode": "navigate",
+          "sec-fetch-dest": "document",
+          ...headers,
+        },
+      }),
+    );
+    return res.headers.get("content-security-policy") ?? "";
+  };
+
+  test.each([
+    ["the same-origin shop's theme page", `${FRESH}/`, {}],
+    [
+      "the same-origin order page",
+      `${FRESH}/o/0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b`,
+      { cookie: `__Host-Http-cap=${CAP}` },
+    ],
+    ["an isolated shop's theme page", "http://iso.localhost:8280/", {}],
+    ["an isolated checkout page", "http://checkout.iso.localhost:8280/", {}],
+  ])("%s never allows the account origin", async (_, url, headers) => {
+    const policy = await csp(url, headers);
+    expect(policy, "a CSP is set").toContain("form-action");
+    expect(policy).not.toContain("accounts.localhost");
   });
 });
