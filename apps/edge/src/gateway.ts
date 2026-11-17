@@ -41,6 +41,17 @@ import {
   workerResponseHeaders,
 } from "./headers.ts";
 import {
+  cleanUrl,
+  grantCookie,
+  isOrderPage,
+  LINK_GRANT_COOKIE,
+  LINK_GRANT_HEADER,
+  type Link,
+  linkIngress,
+  REOPEN_LINK_PAGE,
+  REOPEN_LINK_PATH,
+} from "./link-exchange.ts";
+import {
   CLIENT_PAGE_TOKEN_HEADER,
   pageToken,
   verifyPageToken,
@@ -462,11 +473,13 @@ export function createGateway(opts: GatewayOptions) {
       scope?: string;
       experiment?: Assignment | undefined;
       pageToken?: string | undefined;
+      linkGrant?: string | undefined;
       form?: URLSearchParams | undefined;
     } = {},
   ) {
     const ctxId = registry.open(site, artifactId, {
       cartToken: extra.cartToken,
+      linkGrant: extra.linkGrant,
       sessionToken: extra.sessionToken,
       consentSubject: extra.consentSubject,
       experiment: extra.experiment,
@@ -1774,6 +1787,15 @@ ${
         status: 400,
         headers: { "content-type": "text/html; charset=utf-8" },
       });
+    const ingress = linkIngress(url);
+    if (ingress) {
+      if (req.method !== "GET") return text(405, "Method not allowed", { allow: "GET" });
+      return ingress.kind === "exchange"
+        ? exchangeLink(site, req, ingress.link)
+        : seeOther(ingress.location);
+    }
+    if (url.pathname === REOPEN_LINK_PATH) return reopenLink();
+    if (isOrderPage(url.pathname)) return orderPage(site, req, url);
     if (url.pathname === PLACE_ORDER_FORM) return placeOrder(site, req);
     const form = CHECKOUT_FORMS.get(url.pathname);
     if (form) return checkoutForm(site, req, form);
@@ -1783,27 +1805,75 @@ ${
     return renderCheckout(site, req, url);
   }
 
-  async function renderCheckout(
+  const seeOther = (location: string) =>
+    new Response(null, { status: 303, headers: { location, "cache-control": "no-store" } });
+
+  const reopenLink = () =>
+    new Response(REOPEN_LINK_PAGE, {
+      status: 404,
+      headers: { "content-type": "text/html; charset=utf-8" },
+    });
+
+  async function exchangeLink(site: SameOriginSite, req: Request, link: Link): Promise<Response> {
+    const previous = capabilityCookie(req, LINK_GRANT_COOKIE);
+    const res = await upstream(
+      new Request(`${opts.apiOrigin}/storefront/v1/link-grants`, {
+        method: "POST",
+        headers: apiHeaders(site, { "content-type": "application/json" }),
+        body: JSON.stringify(previous ? { link, previous } : { link }),
+      }),
+    );
+    const grant = res.headers.get(LINK_GRANT_HEADER);
+    const body =
+      res.status === 201
+        ? ((await res.json().catch(() => null)) as { resource?: unknown } | null)
+        : await res.body?.cancel().catch(() => undefined);
+    const location = cleanUrl(body?.resource);
+    if (!location || !grant || !TOKEN_RE.test(grant)) return seeOther(REOPEN_LINK_PATH);
+    return new Response(null, {
+      status: 303,
+      headers: { location, "cache-control": "no-store", "set-cookie": grantCookie(grant) },
+    });
+  }
+
+  async function orderPage(site: SameOriginSite, req: Request, url: URL): Promise<Response> {
+    if (req.method !== "GET" && req.method !== "HEAD")
+      return text(405, "Method not allowed", { allow: "GET, HEAD" });
+    const linkGrant = capabilityCookie(req, LINK_GRANT_COOKIE);
+    if (!linkGrant) return reopenLink();
+    return renderPlatform(site, req, url, { linkGrant });
+  }
+
+  function renderCheckout(
     site: SameOriginSite,
     req: Request,
     url: URL,
     form?: URLSearchParams,
+  ): Promise<Response> {
+    const cartToken = capabilityCookie(req, SAME_ORIGIN_CART_COOKIE);
+    return renderPlatform(site, req, url, {
+      cartToken,
+      pageToken: pageToken(opts.pageTokenSecret, site.shopOrigin, cartToken),
+      form,
+    });
+  }
+
+  async function renderPlatform(
+    site: SameOriginSite,
+    req: Request,
+    url: URL,
+    extra: Parameters<typeof render>[3],
   ): Promise<Response> {
     const artifact = site.checkout_artifact ?? opts.checkoutArtifact;
     if (!artifact || !opts.pageTokenSecret)
       return text(503, "Checkout is not available yet", { "retry-after": "60" });
     const m = await manifest(artifact);
     if (m.kind !== "checkout") throw new Error(`artifact ${artifact} is not a checkout`);
-    const cartToken = capabilityCookie(req, SAME_ORIGIN_CART_COOKIE);
     const r = await render(
       artifact,
       normalizeUrl(new URL(`${url.pathname}${url.search}`, site.shopOrigin)),
       site,
-      {
-        cartToken,
-        pageToken: pageToken(opts.pageTokenSecret, site.shopOrigin, cartToken),
-        form,
-      },
+      extra,
     );
     const csp = contentSecurityPolicy("checkout", {
       scriptHashes: m.csp.script_hashes,
