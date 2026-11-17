@@ -14,7 +14,7 @@ import { testContext } from "../rate-client";
 export const root = join(dirname(fileURLToPath(import.meta.url)), "../..");
 
 /** `.env` values (the Makefile and compose read the same file); the process env wins. */
-function env(name: string, fallback: string): string {
+export function env(name: string, fallback: string): string {
   if (process.env[name]) return process.env[name];
   try {
     const line = readFileSync(join(root, ".env"), "utf8")
