@@ -24,6 +24,7 @@ mod media;
 mod notifications;
 mod ops;
 mod payments;
+mod platform_link_access;
 mod portability;
 mod pricing;
 mod recommendations;
