@@ -85,7 +85,9 @@ http://admin.localhost {
 # (6-connection limit, a TCP handshake per extra connection) by ~300-400 ms of simulated LCP.
 # `*.localhost` also covers theme previews (`preview-<n>--<shop>.localhost`, WP23): the theme
 # builder's checks measure them here, over h2, from the internal `theme-check` network.
-https://demo.localhost, https://demo-sk.localhost, https://checkout.demo.localhost, https://checkout.demo-sk.localhost, https://*.localhost {
+# `*.localhost` matches one label only, so the account origins and the same-origin test shops'
+# old checkout hosts are listed too: WebKit keeps `Secure` cookies only over TLS.
+https://demo.localhost, https://demo-sk.localhost, https://checkout.demo.localhost, https://checkout.demo-sk.localhost, https://checkout.demo-fresh.localhost, https://checkout.demo-fresh-sk.localhost, https://*.accounts.localhost, https://*.localhost {
 	tls internal
 	encode gzip
 	reverse_proxy edge:8787
