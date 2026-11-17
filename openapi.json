@@ -20487,6 +20487,349 @@
         }
       }
     },
+    "/storefront/v1/link-grants/review": {
+      "get": {
+        "tags": [
+          "storefront"
+        ],
+        "summary": "The order line of the grant's review link. Reading consumes nothing.",
+        "operationId": "review_invitation",
+        "parameters": [
+          {
+            "name": "X-Storefront-Token",
+            "in": "header",
+            "description": "The tenant's public storefront token.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Market",
+            "in": "header",
+            "description": "Market id resolved from the shop host by the edge.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-Locale",
+            "in": "header",
+            "description": "Locale hint (one of the market's locales).",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "X-Link-Grant",
+            "in": "header",
+            "description": "The link grant from the `__Host-Http-cap` cookie.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewInvitation"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "no review grant, or its link was used or expired",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "storefront"
+        ],
+        "summary": "Submits the review of the grant's order line. It consumes the emailed link and revokes the\ngrant in the same transaction, so a refused review keeps both.",
+        "operationId": "submit_review",
+        "parameters": [
+          {
+            "name": "X-Storefront-Token",
+            "in": "header",
+            "description": "The tenant's public storefront token.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Market",
+            "in": "header",
+            "description": "Market id resolved from the shop host by the edge.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-Locale",
+            "in": "header",
+            "description": "Locale hint (one of the market's locales).",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "X-Link-Grant",
+            "in": "header",
+            "description": "The link grant from the `__Host-Http-cap` cookie.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewText"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewSubmitted"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "no review grant, or its link was used or expired",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "too_many_reviews",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/storefront/v1/link-grants/withdrawal": {
+      "get": {
+        "tags": [
+          "storefront"
+        ],
+        "summary": "The withdrawal form of the grant's emailed link. Reading consumes nothing.",
+        "operationId": "withdrawal_form",
+        "parameters": [
+          {
+            "name": "X-Storefront-Token",
+            "in": "header",
+            "description": "The tenant's public storefront token.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Market",
+            "in": "header",
+            "description": "Market id resolved from the shop host by the edge.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-Locale",
+            "in": "header",
+            "description": "Locale hint (one of the market's locales).",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "X-Link-Grant",
+            "in": "header",
+            "description": "The link grant from the `__Host-Http-cap` cookie.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WithdrawalForm"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "no withdrawal grant, or its link was used or expired",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "storefront"
+        ],
+        "summary": "The explicit confirmation (A19) on a same-origin shop. It consumes the emailed link and\nrevokes the grant in the same transaction, so a refused declaration keeps both.",
+        "operationId": "declare_withdrawal",
+        "parameters": [
+          {
+            "name": "X-Storefront-Token",
+            "in": "header",
+            "description": "The tenant's public storefront token.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Market",
+            "in": "header",
+            "description": "Market id resolved from the shop host by the edge.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-Locale",
+            "in": "header",
+            "description": "Locale hint (one of the market's locales).",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "X-Link-Grant",
+            "in": "header",
+            "description": "The link grant from the `__Host-Http-cap` cookie.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeclareInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WithdrawalReceipt"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "no withdrawal grant, or its link was used or expired",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "not_withdrawable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "confirmation_required | invalid_withdrawal | iban_required | invalid_iban",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/storefront/v1/link-grants/withdrawal-request": {
       "post": {
         "tags": [
@@ -30973,6 +31316,34 @@
                 ]
               }
             }
+          },
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "withdrawal"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "review"
+                ]
+              }
+            }
           }
         ]
       },
@@ -32287,6 +32658,44 @@
                 "enum": [
                   "withdrawal_request"
                 ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "The withdrawal email link (`/withdraw?t=`); single use, consumed by the declaration.",
+            "required": [
+              "token",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "withdrawal"
+                ]
+              },
+              "token": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "The review email link (`/review?token=`); single use, consumed by the review.",
+            "required": [
+              "token",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "review"
+                ]
+              },
+              "token": {
+                "type": "string"
               }
             }
           }
@@ -37662,6 +38071,35 @@
             "type": "string"
           }
         }
+      },
+      "ReviewText": {
+        "type": "object",
+        "description": "A review without its link, submitted with a review grant.",
+        "required": [
+          "rating",
+          "name",
+          "body"
+        ],
+        "properties": {
+          "body": {
+            "type": "string",
+            "description": "1-4000 characters of plain text."
+          },
+          "name": {
+            "type": "string",
+            "description": "Shown publicly (1-60 characters)."
+          },
+          "rating": {
+            "type": "integer",
+            "format": "int32",
+            "description": "1-5 stars."
+          },
+          "title": {
+            "type": "string",
+            "description": "Optional headline (≤ 120 characters)."
+          }
+        },
+        "additionalProperties": false
       },
       "RevisionDetail": {
         "type": "object",

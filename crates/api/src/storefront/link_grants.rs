@@ -4,7 +4,8 @@ use axum::extract::State;
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use commerce::link_access::{self, Scope, Source};
-use commerce::withdrawals::{self, LinkRequest};
+use commerce::reviews::{self, ReviewInvitation, ReviewText};
+use commerce::withdrawals::{self, DeclareInput, LinkRequest, WithdrawalForm, WithdrawalReceipt};
 use platform::Error;
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
@@ -12,7 +13,8 @@ use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 use uuid::Uuid;
 
-use super::customer::{header_str, no_store};
+use super::customer::{header_str, ip_hash, no_store};
+use super::reviews::ReviewSubmitted;
 use super::{Shopper, StorefrontHeaders, with_ctx};
 use crate::AppState;
 use crate::admin::parse_json;
@@ -23,6 +25,8 @@ pub fn routes() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
         .routes(routes!(exchange))
         .routes(routes!(request_withdrawal))
+        .routes(routes!(withdrawal_form, declare_withdrawal))
+        .routes(routes!(review_invitation, submit_review))
 }
 
 #[derive(IntoParams)]
@@ -41,6 +45,10 @@ pub enum LinkInput {
     Order { token: String },
     /// The public withdrawal form, which has no link.
     WithdrawalRequest,
+    /// The withdrawal email link (`/withdraw?t=`); single use, consumed by the declaration.
+    Withdrawal { token: String },
+    /// The review email link (`/review?token=`); single use, consumed by the review.
+    Review { token: String },
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -56,6 +64,8 @@ pub struct ExchangeInput {
 pub enum GrantedResource {
     Order { id: Uuid },
     WithdrawalRequest,
+    Withdrawal,
+    Review,
 }
 
 #[derive(Serialize, ToSchema)]
@@ -90,6 +100,8 @@ async fn exchange(
     let source = match &input.link {
         LinkInput::Order { token } => Source::OrderLink(token),
         LinkInput::WithdrawalRequest => Source::WithdrawalForm,
+        LinkInput::Withdrawal { token } => Source::WithdrawalLink(token),
+        LinkInput::Review { token } => Source::ReviewLink(token),
     };
     let granted = with_ctx(&s, &shopper, async |tx, ctx| {
         link_access::exchange(tx, ctx, source, input.previous.as_deref()).await
@@ -98,6 +110,8 @@ async fn exchange(
     let resource = match granted.scope {
         Scope::OrderRead(id) => GrantedResource::Order { id },
         Scope::WithdrawalRequest => GrantedResource::WithdrawalRequest,
+        Scope::Withdrawal => GrantedResource::Withdrawal,
+        Scope::Review => GrantedResource::Review,
     };
     let mut res = (StatusCode::CREATED, Json(Exchanged { resource })).into_response();
     res.headers_mut().insert(
@@ -135,4 +149,115 @@ async fn request_withdrawal(
     })
     .await?;
     Ok(StatusCode::ACCEPTED)
+}
+
+/// The withdrawal form of the grant's emailed link. Reading consumes nothing.
+#[utoipa::path(
+    get,
+    path = "/storefront/v1/link-grants/withdrawal",
+    tag = "storefront",
+    params(StorefrontHeaders, GrantHeader),
+    responses(
+        (status = 200, body = WithdrawalForm),
+        (status = 404, description = "no withdrawal grant, or its link was used or expired", body = platform::Problem, content_type = "application/problem+json"),
+    )
+)]
+async fn withdrawal_form(
+    shopper: Shopper,
+    State(s): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Response, Error> {
+    let g = grant(&headers)?;
+    let form = with_ctx(&s, &shopper, async |tx, ctx| {
+        withdrawals::form_by_grant(tx, ctx, g).await
+    })
+    .await?;
+    Ok(no_store(Json(form).into_response()))
+}
+
+/// The explicit confirmation (A19) on a same-origin shop. It consumes the emailed link and
+/// revokes the grant in the same transaction, so a refused declaration keeps both.
+#[utoipa::path(
+    post,
+    path = "/storefront/v1/link-grants/withdrawal",
+    tag = "storefront",
+    params(StorefrontHeaders, GrantHeader),
+    request_body = DeclareInput,
+    responses(
+        (status = 201, body = WithdrawalReceipt),
+        (status = 404, description = "no withdrawal grant, or its link was used or expired", body = platform::Problem, content_type = "application/problem+json"),
+        (status = 409, description = "not_withdrawable", body = platform::Problem, content_type = "application/problem+json"),
+        (status = 422, description = "confirmation_required | invalid_withdrawal | iban_required | invalid_iban", body = platform::Problem, content_type = "application/problem+json"),
+    )
+)]
+async fn declare_withdrawal(
+    shopper: Shopper,
+    State(s): State<AppState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<(StatusCode, Json<WithdrawalReceipt>), Error> {
+    let g = grant(&headers)?;
+    let input: DeclareInput = parse_json(&body)?;
+    let receipt = with_ctx(&s, &shopper, async |tx, ctx| {
+        withdrawals::declare_by_grant(tx, ctx, g, &input).await
+    })
+    .await?;
+    Ok((StatusCode::CREATED, Json(receipt)))
+}
+
+/// The order line of the grant's review link. Reading consumes nothing.
+#[utoipa::path(
+    get,
+    path = "/storefront/v1/link-grants/review",
+    tag = "storefront",
+    params(StorefrontHeaders, GrantHeader),
+    responses(
+        (status = 200, body = ReviewInvitation),
+        (status = 404, description = "no review grant, or its link was used or expired", body = platform::Problem, content_type = "application/problem+json"),
+    )
+)]
+async fn review_invitation(
+    shopper: Shopper,
+    State(s): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Response, Error> {
+    let g = grant(&headers)?;
+    let invitation = with_ctx(&s, &shopper, async |tx, ctx| {
+        reviews::invitation_by_grant(tx, ctx, g).await
+    })
+    .await?;
+    Ok(no_store(Json(invitation).into_response()))
+}
+
+/// Submits the review of the grant's order line. It consumes the emailed link and revokes the
+/// grant in the same transaction, so a refused review keeps both.
+#[utoipa::path(
+    post,
+    path = "/storefront/v1/link-grants/review",
+    tag = "storefront",
+    params(StorefrontHeaders, GrantHeader),
+    request_body = ReviewText,
+    responses(
+        (status = 201, body = ReviewSubmitted),
+        (status = 404, description = "no review grant, or its link was used or expired", body = platform::Problem, content_type = "application/problem+json"),
+        (status = 422, body = platform::Problem, content_type = "application/problem+json"),
+        (status = 429, description = "too_many_reviews", body = platform::Problem, content_type = "application/problem+json"),
+    )
+)]
+async fn submit_review(
+    shopper: Shopper,
+    State(s): State<AppState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<Response, Error> {
+    let g = grant(&headers)?;
+    let input: ReviewText = parse_json(&body)?;
+    with_ctx(&s, &shopper, async |tx, ctx| {
+        let ip = ip_hash(tx, &headers).await?;
+        reviews::submit_by_grant(tx, ctx, g, &input, ip.as_deref()).await
+    })
+    .await?;
+    Ok(no_store(
+        (StatusCode::CREATED, Json(ReviewSubmitted::pending())).into_response(),
+    ))
 }

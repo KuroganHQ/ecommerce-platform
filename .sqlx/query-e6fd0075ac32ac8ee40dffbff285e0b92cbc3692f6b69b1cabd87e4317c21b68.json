@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT expires_at FROM review_tokens\n                 WHERE token_hash = $1 AND used_at IS NULL AND expires_at > now()",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "expires_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "review_tokens",
+            "name": "expires_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Bytea"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "e6fd0075ac32ac8ee40dffbff285e0b92cbc3692f6b69b1cabd87e4317c21b68"
+}

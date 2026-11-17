@@ -80,7 +80,7 @@ const due = order?.payment.expires_at
         {bank && <BankTransfer bank={bank} due={due} m={m} />}
         <OrderDetails order={order} m={m} />
         <OrderDocuments documents={documents} m={m} locale={shop?.locale ?? "cs"} />
-        {!sameOrigin && (order.status === "shipped" || order.status === "delivered") && <a href="/withdraw" class="text-identity-ink underline">{t(m, "withdraw.link")}</a>}
+        {(order.status === "shipped" || order.status === "delivered") && <a href="/withdraw" class="text-identity-ink underline">{t(m, "withdraw.link")}</a>}
       </div>
     )
   }

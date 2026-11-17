@@ -144,6 +144,7 @@ export const CHECKOUT_OPERATIONS: Operation[] = [
   { method: "GET", path: /^\/newsletter\/(confirmation|preferences)$/ },
   // WP16: the review form (review link token in the query).
   { method: "GET", path: /^\/reviews\/invitation$/ },
+  { method: "GET", path: /^\/link-grants\/(withdrawal|review)$/ },
 ];
 
 /**

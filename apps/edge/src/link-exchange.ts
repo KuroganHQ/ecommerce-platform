@@ -18,7 +18,16 @@ const SECRET_PARAMETERS = new Set(["token", "t", "code", ...STRIPE_RETURN_PARAME
 const ORDER_LINK = /^\/o\/([0-9a-f]{64})$/;
 const ORDER_PAGE = /^\/o\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
-export type Link = { kind: "order"; token: string };
+export const WITHDRAWAL_PAGE = "/withdraw/declaration";
+export const REVIEW_PAGE = "/review";
+
+const ACTION_LINKS = new Map<string, { parameter: string; kind: "withdrawal" | "review" }>([
+  ["/withdraw", { parameter: "t", kind: "withdrawal" }],
+  ["/review", { parameter: "token", kind: "review" }],
+]);
+const LINK_TOKEN = /^[0-9a-f]{64}$/;
+
+export type Link = { kind: "order" | "withdrawal" | "review"; token: string };
 export type LinkIngress =
   | { kind: "exchange"; link: Link }
   | { kind: "redirect"; location: string }
@@ -41,6 +50,17 @@ export function linkIngress(url: URL): LinkIngress | null {
       ? { kind: "exchange", link: { kind: "order", token } }
       : { kind: "redirect", location: REOPEN_LINK_PATH };
   }
+  const action = ACTION_LINKS.get(url.pathname);
+  if (action && url.searchParams.has(action.parameter)) {
+    const tokens = url.searchParams.getAll(action.parameter);
+    const others = [...url.searchParams.keys()].filter(
+      (name) => name !== action.parameter && isSecret(name),
+    );
+    const token = tokens.length === 1 && others.length === 0 ? tokens[0] : undefined;
+    return token && LINK_TOKEN.test(token)
+      ? { kind: "exchange", link: { kind: action.kind, token } }
+      : { kind: "redirect", location: failedLink(action.kind) };
+  }
   if (!secrets) return null;
   if (!isCanonicalPlatformPath(url.pathname)) return { kind: "refuse" };
   const kept = new URLSearchParams([...url.searchParams].filter(([name]) => !isSecret(name)));
@@ -50,8 +70,15 @@ export function linkIngress(url: URL): LinkIngress | null {
   return { kind: "redirect", location: query ? `${url.pathname}?${query}` : url.pathname };
 }
 
+export const failedLink = (kind: Link["kind"]) =>
+  kind === "order"
+    ? REOPEN_LINK_PATH
+    : `${kind === "review" ? REVIEW_PAGE : "/withdraw"}?link=invalid`;
+
 export function cleanUrl(resource: unknown): string | null {
   const r = resource as { kind?: unknown; id?: unknown } | null | undefined;
+  if (r?.kind === "withdrawal") return WITHDRAWAL_PAGE;
+  if (r?.kind === "review") return REVIEW_PAGE;
   if (r?.kind !== "order" || typeof r.id !== "string") return null;
   const path = `/o/${r.id}`;
   return isOrderPage(path) ? path : null;

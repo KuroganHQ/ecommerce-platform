@@ -1,0 +1,32 @@
+---
+import { t } from "@platform/storefront-sdk/format";
+import WithdrawalHistory from "../../components/WithdrawalHistory.astro";
+import WithdrawalForm from "../../islands/WithdrawalForm";
+import Checkout from "../../layouts/Checkout.astro";
+import { checkoutApi, grantPageToken, messages, shopUrl } from "../../lib/api";
+
+const api = checkoutApi(Astro.request);
+const [shop, form] = await Promise.all([api.shop(), api.withdrawalByGrant()]);
+const m = shop?.messages ?? {};
+const locale = shop?.locale ?? "cs";
+Astro.response.headers.set("Cache-Control", "no-store");
+if (!form) Astro.response.status = 404;
+const legalPages = shop?.legal_pages ?? [];
+---
+
+<Checkout title={t(m, "withdraw.title")} shopName={shop?.name ?? ""} shopUrl={shopUrl(Astro.url)} lang={locale} accountLabel={t(m, "account.nav")} withdrawalLabel={t(m, "withdraw.title")} pageToken={form ? grantPageToken(Astro.request) : undefined} platformLinks={false}>
+  <div class="grid gap-5">
+    <h1 class="font-display text-2xl font-bold">{t(m, "withdraw.title")}</h1>
+    <p class="text-sm text-muted-foreground">{t(m, "withdraw.rights")}</p>
+    {legalPages.length > 0 && <nav aria-label={t(m, "withdraw.legal")} class="flex flex-wrap gap-3 text-sm">
+      {legalPages.map(link => <a class="text-identity-ink underline" href={new URL(link.href, shopUrl(Astro.url)).href}>{link.label}</a>)}
+    </nav>}
+    {form ? <>
+      <WithdrawalForm client:load form={form} target={{ mode: "grant" }} m={messages(m, "withdraw.")} locale={locale} />
+      <WithdrawalHistory receipts={form.withdrawals} m={m} locale={locale} />
+    </> : <>
+      <p role="alert">{t(m, "withdraw.link_invalid")}</p>
+      <a href="/withdraw" class="text-identity-ink underline">{t(m, "withdraw.send")}</a>
+    </>}
+  </div>
+</Checkout>

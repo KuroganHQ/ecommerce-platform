@@ -358,3 +358,42 @@ export async function mail(to: string, subject: string): Promise<{ Text: string;
   }
   throw new Error(`no email "${subject}" to ${to}`);
 }
+
+export const CLEAN_ORDER = /\/o\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/;
+
+export async function sameOriginOrder(page: Page, email: string): Promise<string> {
+  await sameOriginReview(page, FRESH_HTTPS, email);
+  await chooseCashOnDelivery(page);
+  await acceptAndPlace(page);
+  await page.waitForURL(CLEAN_ORDER);
+  return CLEAN_ORDER.exec(new URL(page.url()).pathname)?.[1] ?? "";
+}
+
+export const historyTraces = (page: Page) =>
+  page.evaluate(() => {
+    const nav = (window as unknown as { navigation?: { entries(): { url: string | null }[] } })
+      .navigation;
+    return {
+      entries: nav ? nav.entries().map((e) => e.url ?? "") : [location.href],
+      referrer: document.referrer,
+      html: document.documentElement.outerHTML,
+    };
+  });
+
+export const themeRequests = (page: Page, requests: [string, string][]) =>
+  page.evaluate(
+    async (list) =>
+      Promise.all(
+        list.map(async ([method, url]) => {
+          const res = await fetch(url, {
+            method,
+            credentials: "include",
+            ...(method === "POST"
+              ? { headers: { "content-type": "application/json" }, body: "{}" }
+              : {}),
+          });
+          return `${method} ${url} ${res.status} ${await res.text()}`;
+        }),
+      ),
+    requests,
+  );

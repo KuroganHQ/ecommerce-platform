@@ -4441,6 +4441,48 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/storefront/v1/link-grants/review": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The order line of the grant's review link. Reading consumes nothing. */
+        get: operations["review_invitation"];
+        put?: never;
+        /**
+         * Submits the review of the grant's order line. It consumes the emailed link and revokes the
+         *     grant in the same transaction, so a refused review keeps both.
+         */
+        post: operations["submit_review"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/storefront/v1/link-grants/withdrawal": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The withdrawal form of the grant's emailed link. Reading consumes nothing. */
+        get: operations["withdrawal_form"];
+        put?: never;
+        /**
+         * The explicit confirmation (A19) on a same-origin shop. It consumes the emailed link and
+         *     revokes the grant in the same transaction, so a refused declaration keeps both.
+         */
+        post: operations["declare_withdrawal"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/storefront/v1/link-grants/withdrawal-request": {
         parameters: {
             query?: never;
@@ -7320,6 +7362,12 @@ export interface components {
         } | {
             /** @enum {string} */
             kind: "withdrawal_request";
+        } | {
+            /** @enum {string} */
+            kind: "withdrawal";
+        } | {
+            /** @enum {string} */
+            kind: "review";
         };
         HandoffToken: {
             /** @description Single use, valid for 60 seconds, for `checkout.<shop>/start?h=`. */
@@ -7800,6 +7848,14 @@ export interface components {
         } | {
             /** @enum {string} */
             kind: "withdrawal_request";
+        } | {
+            /** @enum {string} */
+            kind: "withdrawal";
+            token: string;
+        } | {
+            /** @enum {string} */
+            kind: "review";
+            token: string;
         };
         LinkRequest: {
             email: string;
@@ -9497,6 +9553,20 @@ export interface components {
              */
             review_count: number;
             text: string;
+        };
+        /** @description A review without its link, submitted with a review grant. */
+        ReviewText: {
+            /** @description 1-4000 characters of plain text. */
+            body: string;
+            /** @description Shown publicly (1-60 characters). */
+            name: string;
+            /**
+             * Format: int32
+             * @description 1-5 stars.
+             */
+            rating: number;
+            /** @description Optional headline (≤ 120 characters). */
+            title?: string;
         };
         RevisionDetail: {
             /** @description The builder's gate report: `pipeline`, `sandbox`, `steps[]`, `failures[]`. */
@@ -22759,6 +22829,197 @@ export interface operations {
             };
             /** @description checkout_mode_changed */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    review_invitation: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description The tenant's public storefront token. */
+                "X-Storefront-Token": string;
+                /** @description Market id resolved from the shop host by the edge. */
+                "X-Market": string;
+                /** @description Locale hint (one of the market's locales). */
+                "X-Locale"?: string | null;
+                /** @description The link grant from the `__Host-Http-cap` cookie. */
+                "X-Link-Grant": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewInvitation"];
+                };
+            };
+            /** @description no review grant, or its link was used or expired */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    submit_review: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description The tenant's public storefront token. */
+                "X-Storefront-Token": string;
+                /** @description Market id resolved from the shop host by the edge. */
+                "X-Market": string;
+                /** @description Locale hint (one of the market's locales). */
+                "X-Locale"?: string | null;
+                /** @description The link grant from the `__Host-Http-cap` cookie. */
+                "X-Link-Grant": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReviewText"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewSubmitted"];
+                };
+            };
+            /** @description no review grant, or its link was used or expired */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description too_many_reviews */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    withdrawal_form: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description The tenant's public storefront token. */
+                "X-Storefront-Token": string;
+                /** @description Market id resolved from the shop host by the edge. */
+                "X-Market": string;
+                /** @description Locale hint (one of the market's locales). */
+                "X-Locale"?: string | null;
+                /** @description The link grant from the `__Host-Http-cap` cookie. */
+                "X-Link-Grant": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WithdrawalForm"];
+                };
+            };
+            /** @description no withdrawal grant, or its link was used or expired */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    declare_withdrawal: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description The tenant's public storefront token. */
+                "X-Storefront-Token": string;
+                /** @description Market id resolved from the shop host by the edge. */
+                "X-Market": string;
+                /** @description Locale hint (one of the market's locales). */
+                "X-Locale"?: string | null;
+                /** @description The link grant from the `__Host-Http-cap` cookie. */
+                "X-Link-Grant": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeclareInput"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WithdrawalReceipt"];
+                };
+            };
+            /** @description no withdrawal grant, or its link was used or expired */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description not_withdrawable */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description confirmation_required | invalid_withdrawal | iban_required | invalid_iban */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

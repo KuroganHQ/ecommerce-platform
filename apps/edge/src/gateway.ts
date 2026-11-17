@@ -57,6 +57,7 @@ import {
 } from "./identify.ts";
 import {
   cleanUrl,
+  failedLink,
   grantCookie,
   isOrderPage,
   LINK_GRANT_COOKIE,
@@ -65,6 +66,8 @@ import {
   linkIngress,
   REOPEN_LINK_PAGE,
   REOPEN_LINK_PATH,
+  REVIEW_PAGE,
+  WITHDRAWAL_PAGE,
 } from "./link-exchange.ts";
 import {
   CLIENT_PAGE_TOKEN_HEADER,
@@ -213,6 +216,11 @@ const ORDER_OPS: { method: string; path: RegExp }[] = [
 
 const ORDER_ID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
 const ATTEMPT = "[0-9a-f-]{36}";
+const SAME_ORIGIN_WITHDRAW_OPS = new Map([
+  ["", "/link-grants/withdrawal-request"],
+  ["/declaration", "/link-grants/withdrawal"],
+]);
+
 const SAME_ORIGIN_ORDER_OPS: { method: string; path: RegExp }[] = [
   { method: "GET", path: new RegExp(`^/${ORDER_ID}$`) },
   { method: "GET", path: new RegExp(`^/${ORDER_ID}/payment$`) },
@@ -1186,6 +1194,7 @@ ${
   async function navigationForm(
     site: SameOriginSite,
     req: Request,
+    maxBytes = MAX_JSON_BODY,
   ): Promise<URLSearchParams | Response> {
     if (req.method !== "POST") return text(405, "Method not allowed", { allow: "POST" });
     const admitted =
@@ -1197,8 +1206,8 @@ ${
     const media = (req.headers.get("content-type") ?? "").split(";")[0]?.trim().toLowerCase();
     if (media !== "application/x-www-form-urlencoded")
       return problem(415, "unsupported_media_type", "expected application/x-www-form-urlencoded");
-    const raw = await readCapped(req.body, MAX_JSON_BODY).catch(() => null);
-    if (!raw) return problem(413, "payload_too_large", `body over ${MAX_JSON_BODY} bytes`);
+    const raw = await readCapped(req.body, maxBytes).catch(() => null);
+    if (!raw) return problem(413, "payload_too_large", `body over ${maxBytes} bytes`);
     return new URLSearchParams(new TextDecoder().decode(raw));
   }
 
@@ -1478,6 +1487,36 @@ ${
       port,
       clientIp,
       credential,
+    );
+  }
+
+  async function sameOriginWithdrawApi(
+    site: SameOriginSite,
+    req: Request,
+    rest: string,
+    host: string,
+    port: string,
+    clientIp: string | undefined,
+  ): Promise<Response> {
+    const target = SAME_ORIGIN_WITHDRAW_OPS.get(rest);
+    if (!target || req.method !== "POST")
+      return problem(404, "not_found", "unknown withdrawal operation");
+    const grant = capabilityCookie(req, LINK_GRANT_COOKIE);
+    const presented = req.headers.get(CLIENT_PAGE_TOKEN_HEADER);
+    if (!grant || !verifyPageToken(opts.pageTokenSecret, site.shopOrigin, grant, presented))
+      return new Response(null, { status: 403, headers: { "cache-control": "no-store" } });
+    return checkoutProxy(
+      site,
+      req,
+      target,
+      "",
+      [{ method: "POST", path: /^$/ }],
+      host,
+      port,
+      clientIp,
+      {
+        [LINK_GRANT_HEADER]: grant,
+      },
     );
   }
 
@@ -1986,6 +2025,10 @@ ${
       return fakePay(site, req, url, url.pathname.slice("/_p/fake-pay/".length), site);
     if (url.pathname === REOPEN_LINK_PATH) return reopenLink();
     if (isOrderPage(url.pathname)) return orderPage(site, req, url);
+    if (url.pathname === "/withdraw") return withdrawalRequestPage(site, req, url);
+    if (url.pathname === WITHDRAWAL_PAGE) return grantPage(site, req, url);
+    if (url.pathname === REVIEW_PAGE)
+      return req.method === "POST" ? reviewForm(site, req) : grantPage(site, req, url);
     if (url.pathname === PLACE_ORDER_FORM) return placeOrder(site, req);
     const form = CHECKOUT_FORMS.get(url.pathname);
     if (form) return checkoutForm(site, req, form);
@@ -2004,7 +2047,11 @@ ${
       headers: { "content-type": "text/html; charset=utf-8" },
     });
 
-  async function exchangeLink(site: SameOriginSite, req: Request, link: Link): Promise<Response> {
+  async function exchange(
+    site: SameOriginSite,
+    req: Request,
+    link: Link | { kind: "withdrawal_request" },
+  ): Promise<{ grant: string; resource: unknown } | null> {
     const previous = capabilityCookie(req, LINK_GRANT_COOKIE);
     const res = await upstream(
       new Request(`${opts.apiOrigin}/storefront/v1/link-grants`, {
@@ -2013,18 +2060,88 @@ ${
         body: JSON.stringify(previous ? { link, previous } : { link }),
       }),
     );
-    if (res.status !== 201) {
-      await res.body?.cancel().catch(() => undefined);
-      return seeOther(REOPEN_LINK_PATH);
-    }
     const grant = res.headers.get(LINK_GRANT_HEADER);
+    if (res.status !== 201 || !grant || !TOKEN_RE.test(grant)) {
+      await res.body?.cancel().catch(() => undefined);
+      return null;
+    }
     const body = (await res.json().catch(() => null)) as { resource?: unknown } | null;
-    const location = cleanUrl(body?.resource);
-    if (!location || !grant || !TOKEN_RE.test(grant)) return seeOther(REOPEN_LINK_PATH);
+    return { grant, resource: body?.resource };
+  }
+
+  async function exchangeLink(site: SameOriginSite, req: Request, link: Link): Promise<Response> {
+    const exchanged = await exchange(site, req, link);
+    const location = exchanged && cleanUrl(exchanged.resource);
+    if (!exchanged || !location) return seeOther(failedLink(link.kind));
     return new Response(null, {
       status: 303,
-      headers: { location, "cache-control": "no-store", "set-cookie": grantCookie(grant) },
+      headers: {
+        location,
+        "cache-control": "no-store",
+        "set-cookie": grantCookie(exchanged.grant),
+      },
     });
+  }
+
+  async function withdrawalRequestPage(
+    site: SameOriginSite,
+    req: Request,
+    url: URL,
+  ): Promise<Response> {
+    if (req.method !== "GET") return text(405, "Method not allowed", { allow: "GET" });
+    if (url.searchParams.has("link")) return renderPlatform(site, req, url, {});
+    const exchanged = await exchange(site, req, { kind: "withdrawal_request" });
+    if (!exchanged) throw new Error("withdrawal request grant refused");
+    const page = await renderPlatform(site, req, url, {
+      linkGrant: exchanged.grant,
+      grantPageToken: pageToken(opts.pageTokenSecret, site.shopOrigin, exchanged.grant),
+    });
+    page.headers.append("set-cookie", grantCookie(exchanged.grant));
+    return page;
+  }
+
+  function grantPage(site: SameOriginSite, req: Request, url: URL): Promise<Response> | Response {
+    if (req.method !== "GET" && req.method !== "HEAD")
+      return text(405, "Method not allowed", { allow: "GET, HEAD" });
+    const linkGrant = capabilityCookie(req, LINK_GRANT_COOKIE);
+    return renderPlatform(site, req, url, {
+      linkGrant,
+      grantPageToken: pageToken(opts.pageTokenSecret, site.shopOrigin, linkGrant),
+    });
+  }
+
+  async function reviewForm(site: SameOriginSite, req: Request): Promise<Response> {
+    const form = await navigationForm(site, req, MAX_REVIEW_FORM);
+    if (form instanceof Response) return form;
+    const grant = capabilityCookie(req, LINK_GRANT_COOKIE);
+    const names = [...form.keys()];
+    if (
+      !grant ||
+      new Set(names).size !== names.length ||
+      !verifyPageToken(opts.pageTokenSecret, site.shopOrigin, grant, form.get("_pt"))
+    )
+      return seeOther(REVIEW_PAGE);
+    const res = await upstream(
+      new Request(`${opts.apiOrigin}/storefront/v1/link-grants/review`, {
+        method: "POST",
+        headers: apiHeaders(site, {
+          "content-type": "application/json",
+          [LINK_GRANT_HEADER]: grant,
+        }),
+        body: JSON.stringify({
+          rating: Number(form.get("rating") ?? 0),
+          name: form.get("name") ?? "",
+          title: form.get("title") ?? "",
+          body: form.get("body") ?? "",
+        }),
+      }),
+    );
+    const code = res.status === 422 ? await refusalCode(res) : undefined;
+    await res.body?.cancel().catch(() => undefined);
+    if (res.status === 201) return seeOther(`${REVIEW_PAGE}?done=1`);
+    if (res.status === 404) return seeOther(failedLink("review"));
+    const error = res.status === 429 ? "too_many_reviews" : (code ?? "failed");
+    return seeOther(`${REVIEW_PAGE}?error=${error}`);
   }
 
   async function orderPage(site: SameOriginSite, req: Request, url: URL): Promise<Response> {
@@ -2123,6 +2240,15 @@ ${
         return platformPage(site, req, url);
       if (p.startsWith("/_p/orders/"))
         return sameOriginOrderApi(site, req, p.slice("/_p/orders".length), host, port, clientIp);
+      if (p === "/_p/withdraw" || p.startsWith("/_p/withdraw/"))
+        return sameOriginWithdrawApi(
+          site,
+          req,
+          p.slice("/_p/withdraw".length),
+          host,
+          port,
+          clientIp,
+        );
       if (p.startsWith("/_checkout/")) return checkoutAsset(site, req, p);
       if (p === "/_p/tokens.css") return tokensCss(site);
       if (p === "/_p/checkout" || (p.startsWith("/_p/checkout/") && p !== "/_p/checkout/start"))

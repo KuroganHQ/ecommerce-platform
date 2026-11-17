@@ -11,7 +11,7 @@ import HydratedControls from "./HydratedControls";
 
 export default function WithdrawalForm(props: {
   form: Form;
-  target: { mode: "account" | "token"; id: string };
+  target: { mode: "account" | "token"; id: string } | { mode: "grant" };
   m: Record<string, string>;
   locale: string;
 }) {
@@ -62,10 +62,13 @@ export default function WithdrawalForm(props: {
       note: note() || undefined,
       confirm: true,
     };
+    const target = props.target;
     const path =
-      props.target.mode === "account"
-        ? `/_p/account/orders/${props.target.id}/withdrawal`
-        : `/_p/withdraw/${props.target.id}`;
+      target.mode === "grant"
+        ? "/_p/withdraw/declaration"
+        : target.mode === "account"
+          ? `/_p/account/orders/${target.id}/withdrawal`
+          : `/_p/withdraw/${target.id}`;
     const r = await call<WithdrawalReceipt>("POST", path, body);
     setBusy(false);
     if (r.ok && r.data) {

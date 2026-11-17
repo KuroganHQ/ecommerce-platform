@@ -23,6 +23,7 @@ use uuid::Uuid;
 use crate::ai::review_summary::{self, ReviewSummary};
 use crate::audit;
 use crate::capability;
+use crate::link_access::{self, Scope};
 use crate::markets::invalid;
 use crate::storefront::Context;
 
@@ -216,11 +217,15 @@ pub async fn invitation(tx: &mut TenantTx, token: &str) -> Result<ReviewInvitati
     if !capability::well_formed(token) {
         return Err(Error::NotFound);
     }
+    invitation_by_link(tx, &capability::hash(token)).await
+}
+
+async fn invitation_by_link(tx: &mut TenantTx, link: &[u8]) -> Result<ReviewInvitation, Error> {
     let r = sqlx::query!(
         "SELECT l.name, l.options_label, t.expires_at
          FROM review_tokens t JOIN order_lines l ON l.id = t.order_line_id
          WHERE t.token_hash = $1 AND t.used_at IS NULL AND t.expires_at > now()",
-        capability::hash(token)
+        link
     )
     .fetch_optional(&mut **tx)
     .await?
@@ -232,6 +237,15 @@ pub async fn invitation(tx: &mut TenantTx, token: &str) -> Result<ReviewInvitati
     })
 }
 
+pub async fn invitation_by_grant(
+    tx: &mut TenantTx,
+    ctx: &Context,
+    grant: &str,
+) -> Result<ReviewInvitation, Error> {
+    let link = link_access::read_link(tx, ctx, grant, Scope::Review).await?;
+    invitation_by_link(tx, &link).await
+}
+
 // ---------------------------------------------------------------------------------------
 // Submission
 
@@ -240,6 +254,21 @@ pub async fn invitation(tx: &mut TenantTx, token: &str) -> Result<ReviewInvitati
 pub struct ReviewInput {
     /// The capability from the review link.
     pub token: String,
+    /// 1-5 stars.
+    pub rating: i16,
+    /// Shown publicly (1-60 characters).
+    pub name: String,
+    /// Optional headline (≤ 120 characters).
+    #[serde(default)]
+    pub title: String,
+    /// 1-4000 characters of plain text.
+    pub body: String,
+}
+
+/// A review without its link, submitted with a review grant.
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ReviewText {
     /// 1-5 stars.
     pub rating: i16,
     /// Shown publicly (1-60 characters).
@@ -312,18 +341,18 @@ struct Clean {
     body: String,
 }
 
-fn validate(input: &ReviewInput) -> Result<Clean, Error> {
-    if !(1..=5).contains(&input.rating) {
+fn validate(rating: i16, name: &str, title: &str, body: &str) -> Result<Clean, Error> {
+    if !(1..=5).contains(&rating) {
         return Err(invalid("invalid_rating", "rating must be 1-5"));
     }
-    let name = plain_text(&input.name, false);
-    let title = plain_text(&input.title, false);
-    let body = plain_text(&input.body, true);
+    let name = plain_text(name, false);
+    let title = plain_text(title, false);
+    let body = plain_text(body, true);
     bounded("name", "invalid_name", &name, 1, NAME_MAX)?;
     bounded("title", "invalid_title", &title, 0, TITLE_MAX)?;
     bounded("body", "invalid_body", &body, 1, BODY_MAX)?;
     Ok(Clean {
-        rating: input.rating,
+        rating,
         name,
         title,
         body,
@@ -342,7 +371,29 @@ pub async fn submit(
     if !capability::well_formed(&input.token) {
         return Err(Error::NotFound);
     }
-    let clean = validate(input)?;
+    let clean = validate(input.rating, &input.name, &input.title, &input.body)?;
+    record(tx, ctx, &capability::hash(&input.token), clean, ip_hash).await
+}
+
+pub async fn submit_by_grant(
+    tx: &mut TenantTx,
+    ctx: &Context,
+    grant: &str,
+    text: &ReviewText,
+    ip_hash: Option<&[u8]>,
+) -> Result<Uuid, Error> {
+    let link = link_access::complete_link(tx, ctx, grant, Scope::Review).await?;
+    let clean = validate(text.rating, &text.name, &text.title, &text.body)?;
+    record(tx, ctx, &link, clean, ip_hash).await
+}
+
+async fn record(
+    tx: &mut TenantTx,
+    ctx: &Context,
+    link: &[u8],
+    clean: Clean,
+    ip_hash: Option<&[u8]>,
+) -> Result<Uuid, Error> {
     if let Some(ip) = ip_hash {
         // Serializes count + insert per tenant and IP (until commit), so parallel submissions
         // cannot all slip under the cap.
@@ -378,7 +429,7 @@ pub async fn submit(
         "UPDATE review_tokens SET used_at = now()
          WHERE token_hash = $1 AND used_at IS NULL AND expires_at > now()
          RETURNING order_line_id, product_id",
-        capability::hash(&input.token)
+        link
     )
     .fetch_optional(&mut **tx)
     .await?
@@ -890,6 +941,7 @@ mod tests {
 
     #[test]
     fn validation_limits() {
+        let validate = |i: &ReviewInput| validate(i.rating, &i.name, &i.title, &i.body);
         assert!(validate(&input(5, "Jan", "Good")).is_ok());
         for bad in [
             input(0, "Jan", "Good"),

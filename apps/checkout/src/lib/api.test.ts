@@ -48,3 +48,16 @@ test("expired withdrawal links return null; upstream failures are not presented 
   binding.fetch.mockResolvedValueOnce(new Response(null, { status: 503 }));
   await expect(api.withdrawalForm(token)).rejects.toThrow("checkout API 503");
 });
+
+test.each([
+  ["withdrawalByGrant", "/link-grants/withdrawal"],
+  ["reviewByGrant", "/link-grants/review"],
+] as const)("%s reads by the context's grant, with no link in the path", async (method, path) => {
+  binding.fetch.mockResolvedValueOnce(Response.json({ ok: true }));
+  await expect(api[method]()).resolves.toEqual({ ok: true });
+  expect(binding.fetch).toHaveBeenCalledWith(`https://checkout${path}`, {
+    headers: { "x-platform-ctx": "context" },
+  });
+  binding.fetch.mockResolvedValueOnce(new Response(null, { status: 404 }));
+  await expect(api[method]()).resolves.toBeNull();
+});

@@ -1,7 +1,7 @@
 ---
 import { t } from "@platform/storefront-sdk/format";
 import Checkout from "../layouts/Checkout.astro";
-import { checkoutApi, shopUrl } from "../lib/api";
+import { checkoutApi, grantPageToken, shopUrl } from "../lib/api";
 import { Button, controlClass } from "../ui.tsx";
 
 // Review form (WP16), reached through a review link (one per delivered order line, single
@@ -9,11 +9,17 @@ import { Button, controlClass } from "../ui.tsx";
 // or with the token and an `error` code when the link still works.
 const api = checkoutApi(Astro.request);
 const token = Astro.url.searchParams.get("token") ?? "";
+const pageToken = grantPageToken(Astro.request);
 const done = Astro.url.searchParams.get("done") === "1";
+const invalidLink = Astro.url.searchParams.get("link") === "invalid";
 const error = Astro.url.searchParams.get("error");
 const [shop, invitation] = await Promise.all([
   api.shop(),
-  done ? Promise.resolve(null) : api.reviewInvitation(token),
+  done || invalidLink
+    ? Promise.resolve(null)
+    : pageToken
+      ? api.reviewByGrant()
+      : api.reviewInvitation(token),
 ]);
 const m = shop?.messages ?? {};
 const product = invitation
@@ -31,6 +37,8 @@ const hint = "text-xs text-muted-foreground";
   lang={shop?.locale ?? "cs"}
   accountLabel={t(m, "account.nav")}
   accountUrl={shop?.account_url}
+  pageToken={invitation ? pageToken : undefined}
+  platformLinks={!pageToken}
 >
   <div class="grid max-w-xl gap-4">
     <h1 class="font-display text-2xl font-bold">{t(m, "review.title")}</h1>
@@ -40,14 +48,18 @@ const hint = "text-xs text-muted-foreground";
           {t(m, "review.done")}
         </p>
       ) : invitation ? (
-        <form method="post" action="/_p/reviews" class="grid gap-5">
+        <form method="post" action={pageToken ? "/review" : "/_p/reviews"} class="grid gap-5">
           <p>{t(m, "review.intro", { product })}</p>
           {error && (
             <p role="alert" class="font-medium text-error-700">
               {errorText}
             </p>
           )}
-          <input type="hidden" name="token" value={token} />
+          {pageToken ? (
+            <input type="hidden" name="_pt" value={pageToken} />
+          ) : (
+            <input type="hidden" name="token" value={token} />
+          )}
           <fieldset class="grid gap-2">
             <legend class={`${label} mb-2`}>
               {t(m, "review.rating")}

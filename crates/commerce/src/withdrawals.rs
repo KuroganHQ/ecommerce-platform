@@ -24,6 +24,7 @@ use uuid::Uuid;
 use crate::capability;
 use crate::inventory::{self, MovementRef};
 use crate::invoicing::document::RefundLine;
+use crate::link_access::{self, Scope};
 use crate::markets::invalid;
 use crate::money::Locale;
 use crate::notifications::{self, Brand, Email, Template};
@@ -248,19 +249,33 @@ pub async fn request_link(
     Ok(())
 }
 
+pub async fn form_by_grant(
+    tx: &mut TenantTx,
+    ctx: &Context,
+    grant: &str,
+) -> Result<WithdrawalForm, Error> {
+    let link = link_access::read_link(tx, ctx, grant, Scope::Withdrawal).await?;
+    let order = order_by_link(tx, &link).await?;
+    form(tx, order).await
+}
+
+pub async fn declare_by_grant(
+    tx: &mut TenantTx,
+    ctx: &Context,
+    grant: &str,
+    input: &DeclareInput,
+) -> Result<WithdrawalReceipt, Error> {
+    let link = link_access::complete_link(tx, ctx, grant, Scope::Withdrawal).await?;
+    let order = consume_link(tx, &link).await?;
+    declare(tx, ctx, order, input, "web").await
+}
+
 /// The order behind a valid, unused link.
 pub async fn order_by_token(tx: &mut TenantTx, token: &str) -> Result<Uuid, Error> {
     if !capability::well_formed(token) {
         return Err(Error::NotFound);
     }
-    sqlx::query_scalar!(
-        "SELECT order_id FROM withdrawal_tokens
-         WHERE token_hash = $1 AND used_at IS NULL AND expires_at > now()",
-        capability::hash(token)
-    )
-    .fetch_optional(&mut **tx)
-    .await?
-    .ok_or(Error::NotFound)
+    order_by_link(tx, &capability::hash(token)).await
 }
 
 /// Consumes a link atomically (single use); `404` if it was used meanwhile.
@@ -268,11 +283,26 @@ pub async fn consume_token(tx: &mut TenantTx, token: &str) -> Result<Uuid, Error
     if !capability::well_formed(token) {
         return Err(Error::NotFound);
     }
+    consume_link(tx, &capability::hash(token)).await
+}
+
+async fn order_by_link(tx: &mut TenantTx, link: &[u8]) -> Result<Uuid, Error> {
+    sqlx::query_scalar!(
+        "SELECT order_id FROM withdrawal_tokens
+         WHERE token_hash = $1 AND used_at IS NULL AND expires_at > now()",
+        link
+    )
+    .fetch_optional(&mut **tx)
+    .await?
+    .ok_or(Error::NotFound)
+}
+
+async fn consume_link(tx: &mut TenantTx, link: &[u8]) -> Result<Uuid, Error> {
     sqlx::query_scalar!(
         "UPDATE withdrawal_tokens SET used_at = now()
          WHERE token_hash = $1 AND used_at IS NULL AND expires_at > now()
          RETURNING order_id",
-        capability::hash(token)
+        link
     )
     .fetch_optional(&mut **tx)
     .await?

@@ -61,6 +61,11 @@ const CLEAN_PAGES = [
   "/newsletter/preferences",
 ];
 
+const LINK_POSITIONS = new Map([
+  ["/withdraw", "t"],
+  ["/review", "token"],
+]);
+
 const sameOrigin = (origin: string): CheckoutPolicy => ({
   origin,
   mode: "same_origin",
@@ -228,9 +233,12 @@ describe("every C5 parameter is stripped before a platform page renders", () => 
         NAVIGATE,
       );
       const stripeReturn = !["token", "t", "code"].includes(name);
+      const doubledLink = LINK_POSITIONS.get(page) === name;
       expect(res.status).toBe(303);
       expect(res.headers.get("location")).toBe(
-        `${page}?error=stale_page${stripeReturn ? "&returned=1" : ""}`,
+        doubledLink
+          ? `${page}?link=invalid`
+          : `${page}?error=stale_page${stripeReturn ? "&returned=1" : ""}`,
       );
       expect(res.headers.get("cache-control")).toBe("no-store");
       expect(res.headers.getSetCookie()).toEqual([]);
