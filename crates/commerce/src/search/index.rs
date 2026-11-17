@@ -57,7 +57,7 @@ pub fn settings(synonyms: &Value) -> Value {
         "sortableAttributes": [
             "price", "popularity", "sales", "rating_score", "created_at", "product_id"
         ],
-        "rankingRules": ["words", "typo", "proximity", "attributeRank", "sort", "wordPosition", "exactness"],
+        "rankingRules": ["words", "sort", "typo", "proximity", "attributeRank", "wordPosition", "exactness"],
         "distinctAttribute": "product_id",
         "typoTolerance": { "disableOnAttributes": ["skus", "eans"], "disableOnNumbers": true },
         // Per-tenant synonyms in normalized form (`synonyms::for_locale`).
