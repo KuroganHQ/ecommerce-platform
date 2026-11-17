@@ -1,14 +1,9 @@
-//! Consent (A20): `POST /_p/consent` on the shop and checkout origins lands here through the
-//! edge. The anonymous subject id travels in `X-Consent-Subject` (the edge's consent cookie);
-//! a new one is minted on the first choice and returned in the same header, together with
-//! `X-Consent-Summary` for the script-readable cookie (see `docs/decisions/consent-contract.md`).
-
 use axum::Json;
 use axum::body::Bytes;
 use axum::extract::State;
 use axum::http::{HeaderMap, HeaderValue};
 use axum::response::{IntoResponse, Response};
-use commerce::consent::{self, ConsentChoice, ConsentState, Purposes, Subject};
+use commerce::consent::{self, ConsentState, CookieChoice, Purposes, Subject};
 use platform::Error;
 use utoipa::IntoParams;
 use utoipa_axum::router::OpenApiRouter;
@@ -48,7 +43,8 @@ fn anon(headers: &HeaderMap) -> Option<String> {
         .map(str::to_owned)
 }
 
-/// The anonymous subject's current choice. `text_version: null` means no choice yet.
+/// The anonymous subject's cookie categories. `text_version: null` means no choice yet; the
+/// email purposes are always `null`.
 #[utoipa::path(
     get,
     path = "/storefront/v1/consent",
@@ -63,7 +59,7 @@ async fn get_consent(
 ) -> Result<Response, Error> {
     let anon = anon(&headers);
     let state = with_ctx(&s, &shopper, async |tx, _| match anon {
-        Some(a) => consent::state(tx, &Subject::Anon(a)).await,
+        Some(a) => consent::cookie_state(tx, &a).await,
         None => Ok(ConsentState {
             purposes: Purposes::default(),
             text_version: None,
@@ -73,14 +69,15 @@ async fn get_consent(
     Ok(no_store(Json(state).into_response()))
 }
 
-/// Records a choice for the anonymous subject (minted on the first choice) and answers its new
-/// state.
+/// Records the browser's cookie categories for the anonymous subject (minted on the first
+/// choice, source `browser`) and answers its new state. A body `source` is ignored; email
+/// purposes are refused.
 #[utoipa::path(
     post,
     path = "/storefront/v1/consent",
     tag = "storefront",
     params(StorefrontHeaders, ConsentHeaders),
-    request_body = ConsentChoice,
+    request_body = CookieChoice,
     responses(
         (status = 200, body = ConsentState, headers(
             ("X-Consent-Subject" = String, description = "The anonymous subject id (for the edge's cookie)"),
@@ -96,15 +93,14 @@ async fn post_consent(
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<Response, Error> {
-    let choice: ConsentChoice = parse_json(&body)?;
+    let choice: CookieChoice = parse_json(&body)?;
     let subject = anon(&headers).unwrap_or_else(consent::new_anon_id);
     let (state, experiments) = with_ctx(&s, &shopper, async |tx, _| {
         let ip = ip_hash(tx, &headers).await?;
-        let anon = Subject::Anon(subject.clone());
-        consent::record(tx, &anon, &choice, ip.as_deref()).await?;
+        consent::record_anonymous(tx, &subject, &choice, ip.as_deref()).await?;
         Ok((
-            consent::state(tx, &anon).await?,
-            consent::analytics_covers_experiments(tx, &anon).await?,
+            consent::cookie_state(tx, &subject).await?,
+            consent::analytics_covers_experiments(tx, &Subject::Anon(subject.clone())).await?,
         ))
     })
     .await?;

@@ -73,7 +73,6 @@ export async function saveConsent(
   const body = JSON.stringify({
     purposes: Object.fromEntries(asked.offered.map((p) => [p, granted.includes(p)])),
     text_version: asked.textVersion,
-    source: "banner",
   });
   // A beacon survives navigation and its answer is not ours to handle; fetch only where
   // beacons are unavailable.

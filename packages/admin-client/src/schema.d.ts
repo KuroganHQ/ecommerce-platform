@@ -3986,12 +3986,16 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** The anonymous subject's current choice. `text_version: null` means no choice yet. */
+        /**
+         * The anonymous subject's cookie categories. `text_version: null` means no choice yet; the
+         *     email purposes are always `null`.
+         */
         get: operations["get_consent"];
         put?: never;
         /**
-         * Records a choice for the anonymous subject (minted on the first choice) and answers its new
-         *     state.
+         * Records the browser's cookie categories for the anonymous subject (minted on the first
+         *     choice, source `browser`) and answers its new state. A body `source` is ignored; email
+         *     purposes are refused.
          */
         post: operations["post_consent"];
         delete?: never;
@@ -6268,10 +6272,10 @@ export interface components {
             /** @description The address, partly masked (`j***@example.com`). */
             email: string;
         };
-        /** @description A choice as posted to `/_p/consent` (the contract in `docs/decisions/consent-contract.md`). */
+        /** @description A choice on the account origin (`/_p/account/consent`) or at checkout placement. */
         ConsentChoice: {
             purposes: components["schemas"]["Purposes"];
-            /** @description `banner` (default) or `preferences`. */
+            /** @description Ignored on the account origin (recorded as `account`). */
             source?: components["schemas"]["Source"];
             /** @description The consent text version the person saw (`GET /shop` → `consent.text_version`). */
             text_version: string;
@@ -6296,6 +6300,21 @@ export interface components {
         ContactInput: {
             email: string;
             phone?: string | null;
+        };
+        /**
+         * @description A choice as posted to `/_p/consent` (the contract in `docs/decisions/consent-contract.md`).
+         *     Other keys, `source` included, are ignored: the server records where the choice came from.
+         */
+        CookieChoice: {
+            purposes: components["schemas"]["CookiePurposes"];
+            /** @description The consent text version the person saw (`GET /shop` → `consent.text_version`). */
+            text_version: string;
+        };
+        /** @description The browser's cookie categories: all `/_p/consent` may set (C9). */
+        CookiePurposes: {
+            ads?: boolean | null;
+            analytics?: boolean | null;
+            personalization?: boolean | null;
         };
         /**
          * @description What the edge flushes every few seconds (`POST /internal/v1/analytics/counters`). The edge
@@ -21221,7 +21240,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ConsentChoice"];
+                "application/json": components["schemas"]["CookieChoice"];
             };
         };
         responses: {

@@ -137,18 +137,39 @@ impl Purposes {
     }
 }
 
+/// The browser's cookie categories: all `/_p/consent` may set (C9).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CookiePurposes {
+    #[serde(default)]
+    pub analytics: Option<bool>,
+    #[serde(default)]
+    pub ads: Option<bool>,
+    #[serde(default)]
+    pub personalization: Option<bool>,
+}
+
+/// A choice as posted to `/_p/consent` (the contract in `docs/decisions/consent-contract.md`).
+/// Other keys, `source` included, are ignored: the server records where the choice came from.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct CookieChoice {
+    pub purposes: CookiePurposes,
+    /// The consent text version the person saw (`GET /shop` → `consent.text_version`).
+    pub text_version: String,
+}
+
 /// Where a choice was made.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Source {
-    /// The theme's consent banner (shop origin).
+    /// The theme's consent banner, as claimed by clients before C9.
     #[default]
     Banner,
-    /// The preferences page (checkout origin).
+    /// The preferences page, as claimed by clients before C9.
     Preferences,
     /// Checkout checkboxes (WP10).
     Checkout,
-    /// Copied from the anonymous subject at sign-in.
+    /// Copied from the anonymous subject at sign-in before SHOP-95; never accepted.
     Linked,
 }
 
@@ -163,14 +184,14 @@ impl Source {
     }
 }
 
-/// A choice as posted to `/_p/consent` (the contract in `docs/decisions/consent-contract.md`).
+/// A choice on the account origin (`/_p/account/consent`) or at checkout placement.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ConsentChoice {
     pub purposes: Purposes,
     /// The consent text version the person saw (`GET /shop` → `consent.text_version`).
     pub text_version: String,
-    /// `banner` (default) or `preferences`.
+    /// Ignored on the account origin (recorded as `account`).
     #[serde(default)]
     pub source: Source,
 }
@@ -221,6 +242,52 @@ pub async fn record(
         ip_hash,
     )
     .await
+}
+
+pub async fn record_anonymous(
+    tx: &mut TenantTx,
+    anon: &str,
+    choice: &CookieChoice,
+    ip_hash: Option<&[u8]>,
+) -> Result<(), Error> {
+    if !valid_text_version(&choice.text_version) {
+        return Err(invalid(
+            "invalid_text_version",
+            "text_version must be 1-32 of [A-Za-z0-9_-]",
+        ));
+    }
+    let c = choice.purposes;
+    let choices = Purposes {
+        analytics: c.analytics,
+        ads: c.ads,
+        personalization: c.personalization,
+        ..Purposes::default()
+    }
+    .choices();
+    if choices.is_empty() {
+        return Err(invalid("no_purposes", "choose at least one purpose"));
+    }
+    insert(
+        tx,
+        &Subject::Anon(anon.to_owned()),
+        &choices,
+        &choice.text_version,
+        "browser",
+        ip_hash,
+    )
+    .await
+}
+
+pub async fn cookie_state(tx: &mut TenantTx, anon: &str) -> Result<ConsentState, Error> {
+    let all = state(tx, &Subject::Anon(anon.to_owned())).await?;
+    Ok(ConsentState {
+        purposes: Purposes {
+            email_marketing: None,
+            review_invites: None,
+            ..all.purposes
+        },
+        text_version: all.text_version,
+    })
 }
 
 /// A signed-in customer's email preferences, saved on the account origin (source `account`).

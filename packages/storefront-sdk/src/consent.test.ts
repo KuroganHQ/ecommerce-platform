@@ -93,7 +93,6 @@ test("the choice goes out as a JSON beacon when the browser has sendBeacon", asy
   expect(JSON.parse((await beacons[0]?.[1].text()) ?? "null")).toEqual({
     purposes: { analytics: true, ads: false, personalization: false },
     text_version: "2026-09-25",
-    source: "banner",
   });
 });
 

@@ -8,11 +8,6 @@ import { problemText } from "./SignIn";
 
 type Purpose = keyof ConsentPurposes;
 
-/**
- * Consent preferences (A20): the theme banner's contract (`source: "preferences"`) posted to
- * `endpoint`, `/_p/consent` on the checkout origin or `/_p/account/consent` (email purposes
- * only) on the account origin.
- */
 export default function ConsentForm(props: {
   m: Record<string, string>;
   purposes: ConsentPurposes;
@@ -37,7 +32,6 @@ export default function ConsentForm(props: {
     const r = await call("POST", props.endpoint, {
       purposes: values(),
       text_version: props.textVersion,
-      source: "preferences",
     });
     setBusy(false);
     if (r.ok) setStatus(t(m, "consent.saved"));

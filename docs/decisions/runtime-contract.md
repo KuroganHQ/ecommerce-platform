@@ -181,7 +181,7 @@ cart capability is injected from the `__Host-cart` cookie by the edge, never exp
 | `<shop>/_p/checkout/start` (POST) | handoff (§7) |
 | `<shop>/_p/public/<storefront op>` (GET) | public page-model reads for islands |
 | `<shop>/_p/e`, `/_p/newsletter` (POST) | events beacon, newsletter |
-| `<shop>/_p/consent`, `checkout.<shop>/_p/consent` (GET, POST) | consent (A20, `consent-contract.md`) |
+| `<shop>/_p/consent`, `checkout.<shop>/_p/consent` (GET, POST) | anonymous cookie consent only, never a customer (A20, C9, `consent-contract.md`) |
 | `<shop>/_p/speculation-rules.json` | rules |
 | `<shop>/account[/addresses\|security\|verify\|orders/<uuid>]`, same on `checkout.<shop>` | `308`, `no-store`, to the same path and query on the market's account origin (SHOP-95, §13) |
 | other `/_p/*`, `/_edge/*` | 404 |

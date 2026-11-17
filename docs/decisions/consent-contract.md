@@ -17,7 +17,9 @@ asks for the ones in `GET /shop` → `consent.purposes` (M1: `analytics`, `ads`,
 
 On the shop origin (`<shop>/_p/consent`) and the checkout origin (`checkout.<shop>/_p/consent`).
 The platform banner (`@platform/storefront-sdk/consent-banner`, `saveConsent`) sends it as a
-beacon; themes should use that component rather than post themselves.
+beacon; themes should use that component rather than post themselves. Any theme script can call
+it, so it records the browser's cookie categories only and never a customer's preferences
+(`same-origin-checkout.md` C9).
 
 ```http
 POST /_p/consent
@@ -25,24 +27,28 @@ Content-Type: application/json
 Origin: https://<same origin>
 
 {"purposes": {"analytics": true, "ads": false, "personalization": true},
- "text_version": "2026-09-25", "source": "banner"}
+ "text_version": "2026-09-25"}
 ```
 
-- `purposes`: any subset of the five; the banner sends every purpose it offered, granted or
-  refused. Omitted purposes are left as they are. Unknown keys are refused (`422`). At least one.
+- `purposes`: any subset of `analytics`, `ads` and `personalization`; the banner sends every
+  purpose it offered, granted or refused. Omitted purposes are left as they are. At least one.
+  `email_marketing`, `review_invites` and unknown keys are refused (`422`).
 - `text_version`: the one from `GET /shop` → `consent.text_version` (the wording the person
   saw), `[A-Za-z0-9_-]{1,32}`.
-- `source` (optional): `banner` (default) or `preferences`.
+- Other keys are ignored, `source` included: the server records every choice made here as
+  `browser`, because a theme can call the route from any page.
 - Same-origin JSON only (`Origin` equal to the page's origin, else `Sec-Fetch-Site:
   same-origin`), 16 kB max. Anything else is `403`/`415`/`413` from the edge.
 - Response `200` with the anonymous subject's current state (`ConsentState`):
   `{"purposes": {"analytics": true, "ads": false, "personalization": true,
   "email_marketing": null, "review_invites": null}, "text_version": "2026-09-25"}`.
-  `null` = never asked.
+  `null` = never asked. The email purposes are always `null` here.
 
 Each purpose becomes one append-only `consent_records` row (`subject`, `purpose`, `granted`,
 `text_version`, `source`, IP hashed with the daily rotating salt, time), for the anonymous
-subject only. No route on the shop or checkout origin records a choice for a customer.
+subject only. The route reads no session or account cookie, and no route on the shop or
+checkout origin records a choice for a customer. Email purposes recorded for an anonymous subject
+before C9 stay as evidence and are never shown or used.
 
 ## Cookies (only after a choice)
 
@@ -64,22 +70,24 @@ A theme uses the `consent` cookie (`readConsent`, `hasConsent`) only to decide w
 
 ## Reading the state: `GET /_p/consent`
 
-Same routes, no body. Answers a `ConsentState`: this browser's anonymous subject's choices;
-`text_version: null` when there is no choice yet.
+Same routes, no body. Answers a `ConsentState`: this browser's anonymous subject's cookie
+categories; `text_version: null` when there is no choice yet.
 Sets no cookies. Themes normally read the `consent` cookie instead (no request).
 
 ## Preferences page
 
 `checkout.<shop>/consent` (`GET /shop` → `consent.preferences_url`), linked from the banner
-and the footer. It posts the same contract with `source: "preferences"` and shows the cookie
-purposes only.
+and the footer. It posts the same contract and shows the cookie purposes only.
 
 ## Customers
 
-A customer's `email_marketing` and `review_invites` are set on the account origin
-(`GET`/`POST /_p/account/consent`, source `account`) or at checkout placement. Sign-in does not
-copy the anonymous subject's choices to the customer (SHOP-95: the account origin has no
-consent cookie). Records written as `source: linked` before SHOP-95 stay as evidence.
+A customer's `email_marketing` and `review_invites` change only on platform pages: the account
+origin (`GET`/`POST /_p/account/consent`, source `account`), checkout placement (source
+`checkout`) and the newsletter flows (double opt-in, preferences, unsubscribe). Neither sign-in
+nor checkout identify copies the anonymous subject's choices to the customer, and nothing links
+an anonymous subject to a customer (SHOP-95: the account origin has no consent cookie). Records
+written as `source: linked` before SHOP-95, and as `banner` or `preferences` before C9, stay as
+evidence.
 
 ## Experiments (SHOP-96)
 
