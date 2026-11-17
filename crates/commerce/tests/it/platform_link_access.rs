@@ -1,6 +1,6 @@
 use commerce::capability;
 use commerce::checkout_access::ShopOrigin;
-use commerce::link_access::{self, Link, Scope};
+use commerce::link_access::{self, Scope, Source};
 use commerce::orders;
 use commerce::tenancy::CheckoutMode;
 use platform::Error;
@@ -16,11 +16,11 @@ impl At {
     async fn exchange(
         &self,
         runtime: &PgPool,
-        link: Link<'_>,
+        source: Source<'_>,
         previous: Option<&str>,
     ) -> Result<(String, Scope), Error> {
         self.run(runtime, async |tx, ctx| {
-            link_access::exchange(tx, ctx, link, previous)
+            link_access::exchange(tx, ctx, source, previous)
                 .await
                 .map(|g| (g.token, g.scope))
         })
@@ -96,7 +96,7 @@ async fn grant_is_scoped_to_its_resource_and_action(db: PgPool) {
     let (b, _) = order(&runtime, &shop).await;
 
     let (grant, scope) = at
-        .exchange(&runtime, Link::Order(&a_token), None)
+        .exchange(&runtime, Source::OrderLink(&a_token), None)
         .await
         .unwrap();
     assert_eq!(
@@ -129,7 +129,7 @@ async fn grant_is_scoped_to_its_resource_and_action(db: PgPool) {
     );
 
     let (anonymous, scope) = at
-        .exchange(&runtime, Link::WithdrawalRequest, None)
+        .exchange(&runtime, Source::WithdrawalForm, None)
         .await
         .unwrap();
     assert_eq!(scope, Scope::WithdrawalRequest);
@@ -161,7 +161,7 @@ async fn idle_30m_reads_refresh_invalid_reads_do_not_and_link_expiry_holds(db: P
     let (shop, at) = same_origin(&runtime, "lgidle").await;
     let (a, token) = order(&runtime, &shop).await;
     let (grant, _) = at
-        .exchange(&runtime, Link::Order(&token), None)
+        .exchange(&runtime, Source::OrderLink(&token), None)
         .await
         .unwrap();
 
@@ -190,7 +190,7 @@ async fn idle_30m_reads_refresh_invalid_reads_do_not_and_link_expiry_holds(db: P
     );
 
     let (fresh, _) = at
-        .exchange(&runtime, Link::Order(&token), None)
+        .exchange(&runtime, Source::OrderLink(&token), None)
         .await
         .unwrap();
     assert!(
@@ -209,7 +209,7 @@ async fn idle_30m_reads_refresh_invalid_reads_do_not_and_link_expiry_holds(db: P
     .unwrap();
     tx.commit().await.unwrap();
     assert!(
-        not_found(&at.exchange(&runtime, Link::Order(&token), None).await),
+        not_found(&at.exchange(&runtime, Source::OrderLink(&token), None).await),
         "an expired email link exchanges to nothing"
     );
 }
@@ -222,12 +222,12 @@ async fn newer_link_revokes_prior_grant_and_a_failed_exchange_keeps_it(db: PgPoo
     let (b, b_token) = order(&runtime, &shop).await;
 
     let (first, _) = at
-        .exchange(&runtime, Link::Order(&a_token), None)
+        .exchange(&runtime, Source::OrderLink(&a_token), None)
         .await
         .unwrap();
     assert!(
         not_found(
-            &at.exchange(&runtime, Link::Order(&"0".repeat(64)), Some(&first))
+            &at.exchange(&runtime, Source::OrderLink(&"0".repeat(64)), Some(&first))
                 .await
         ),
         "an unknown link exchanges to nothing"
@@ -239,7 +239,7 @@ async fn newer_link_revokes_prior_grant_and_a_failed_exchange_keeps_it(db: PgPoo
         "a failed exchange keeps the prior grant"
     );
     let (second, _) = at
-        .exchange(&runtime, Link::Order(&b_token), Some(&first))
+        .exchange(&runtime, Source::OrderLink(&b_token), Some(&first))
         .await
         .unwrap();
     assert!(
@@ -259,14 +259,19 @@ async fn read_queued_behind_replacement_fails(db: PgPool) {
     let (shop, at) = same_origin(&runtime, "lgrace").await;
     let (a, token) = order(&runtime, &shop).await;
     let (first, _) = at
-        .exchange(&runtime, Link::Order(&token), None)
+        .exchange(&runtime, Source::OrderLink(&token), None)
         .await
         .unwrap();
 
     let (mut replacing, ctx) = at.tx(&runtime).await;
-    let replaced = link_access::exchange(&mut replacing, &ctx, Link::Order(&token), Some(&first))
-        .await
-        .unwrap();
+    let replaced = link_access::exchange(
+        &mut replacing,
+        &ctx,
+        Source::OrderLink(&token),
+        Some(&first),
+    )
+    .await
+    .unwrap();
     let replacing_pid = pid(&mut replacing).await;
     let (pid_tx, pid_rx) = oneshot::channel();
     let reader = tokio::spawn({
@@ -299,7 +304,7 @@ async fn single_use_action_replay_denied_preview_does_not_consume(db: PgPool) {
     let runtime = testkit::runtime_pool(&db, 2).await;
     let (_, at) = same_origin(&runtime, "lgonce").await;
     let (grant, _) = at
-        .exchange(&runtime, Link::WithdrawalRequest, None)
+        .exchange(&runtime, Source::WithdrawalForm, None)
         .await
         .unwrap();
 
@@ -352,7 +357,7 @@ async fn grant_denied_on_alias_other_tenant_and_after_mode_switch(db: PgPool) {
     let (_, other_at) = same_origin(&runtime, "lgalias-other").await;
     let (a, token) = order(&runtime, &shop).await;
     let (grant, _) = at
-        .exchange(&runtime, Link::Order(&token), None)
+        .exchange(&runtime, Source::OrderLink(&token), None)
         .await
         .unwrap();
 
@@ -370,7 +375,7 @@ async fn grant_denied_on_alias_other_tenant_and_after_mode_switch(db: PgPool) {
     switch(&runtime, &shop, &alias_origin, CheckoutMode::SameOrigin).await;
     let alias = crate::checkout_access::at(&shop, shop.cz, &alias_origin);
     let (grant, _) = at
-        .exchange(&runtime, Link::Order(&token), Some(&grant))
+        .exchange(&runtime, Source::OrderLink(&token), Some(&grant))
         .await
         .unwrap();
     assert!(
@@ -386,7 +391,11 @@ async fn grant_denied_on_alias_other_tenant_and_after_mode_switch(db: PgPool) {
         "another tenant"
     );
     assert!(
-        not_found(&other_at.exchange(&runtime, Link::Order(&token), None).await),
+        not_found(
+            &other_at
+                .exchange(&runtime, Source::OrderLink(&token), None)
+                .await
+        ),
         "another tenant cannot exchange this shop's link"
     );
     assert!(
@@ -400,7 +409,7 @@ async fn grant_denied_on_alias_other_tenant_and_after_mode_switch(db: PgPool) {
         not_found(&at.authorize(&runtime, &grant, Scope::OrderRead(a)).await),
         "a mode switch ends every grant of the shop"
     );
-    let refused = at.exchange(&runtime, Link::Order(&token), None).await;
+    let refused = at.exchange(&runtime, Source::OrderLink(&token), None).await;
     assert!(
         matches!(&refused, Err(Error::Conflict { code, .. }) if *code == "checkout_mode_changed"),
         "isolated origins exchange nothing: {refused:?}"
@@ -413,7 +422,7 @@ async fn grant_ends_when_its_link_is_erased(db: PgPool) {
     let (shop, at) = same_origin(&runtime, "lgerase").await;
     let (a, token) = order(&runtime, &shop).await;
     let (grant, _) = at
-        .exchange(&runtime, Link::Order(&token), None)
+        .exchange(&runtime, Source::OrderLink(&token), None)
         .await
         .unwrap();
     let mut tx = tenant_tx(&runtime, shop.tenant).await.unwrap();

@@ -16,7 +16,6 @@ export interface RequestContext {
   /** Artifact that is allowed to use this context (a worker cannot borrow another's). */
   artifactId: string;
   cartToken?: string | undefined;
-  /** Same-origin order page only: the link grant from the `__Host-Http-cap` cookie (C5). */
   linkGrant?: string | undefined;
   /** Checkout origin only: the customer session from the `__Host-sid` cookie (WP9). */
   sessionToken?: string | undefined;

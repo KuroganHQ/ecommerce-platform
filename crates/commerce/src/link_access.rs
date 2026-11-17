@@ -18,7 +18,6 @@ use crate::tenancy::CheckoutMode;
 pub const IDLE_MINUTES: i64 = 30;
 const ANONYMOUS_HOURS: i64 = 24;
 
-/// The resource and action a grant allows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Scope {
     OrderRead(Uuid),
@@ -35,11 +34,10 @@ impl Scope {
     }
 }
 
-/// What the browser presented: an order email link, or no link at all.
 #[derive(Debug, Clone, Copy)]
-pub enum Link<'a> {
-    Order(&'a str),
-    WithdrawalRequest,
+pub enum Source<'a> {
+    OrderLink(&'a str),
+    WithdrawalForm,
 }
 
 #[derive(Debug)]
@@ -48,19 +46,19 @@ pub struct Granted {
     pub scope: Scope,
 }
 
-/// Exchanges `link` for a new grant and revokes the browser's `previous` grant on this origin.
+/// Exchanges `source` for a new grant and revokes the browser's `previous` grant on this origin.
 /// `previous` is a revocation hint, never authorization. An unknown or expired link is `404`
 /// and revokes nothing; an isolated origin is `409 checkout_mode_changed`.
 pub async fn exchange(
     tx: &mut TenantTx,
     ctx: &Context,
-    link: Link<'_>,
+    source: Source<'_>,
     previous: Option<&str>,
 ) -> Result<Granted, Error> {
     let p = enter(tx, ctx).await?;
     require(&p, CheckoutMode::SameOrigin)?;
-    let (scope, link_hash, expires_at): (Scope, Option<Vec<u8>>, DateTime<Utc>) = match link {
-        Link::Order(token) => {
+    let (scope, link_hash, expires_at): (Scope, Option<Vec<u8>>, DateTime<Utc>) = match source {
+        Source::OrderLink(token) => {
             if !capability::well_formed(token) {
                 return Err(Error::NotFound);
             }
@@ -79,7 +77,7 @@ pub async fn exchange(
                 row.expires_at,
             )
         }
-        Link::WithdrawalRequest => (
+        Source::WithdrawalForm => (
             Scope::WithdrawalRequest,
             None,
             Utc::now() + Duration::hours(ANONYMOUS_HOURS),

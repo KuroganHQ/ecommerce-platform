@@ -1,14 +1,9 @@
-//! Link grants (decision C5) for same-origin shops. Only the edge calls these: it exchanges an
-//! emailed link from an admitted navigation for a grant, keeps the grant in the `HttpOnly`
-//! `__Host-Http-cap` cookie and forwards it as `X-Link-Grant`. The grant never appears in a
-//! response body.
-
 use axum::Json;
 use axum::body::Bytes;
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
-use commerce::link_access::{self, Link, Scope};
+use commerce::link_access::{self, Scope, Source};
 use commerce::orders::{self, OrderView};
 use commerce::withdrawals::{self, LinkRequest};
 use platform::Error;
@@ -94,12 +89,12 @@ async fn exchange(
     body: Bytes,
 ) -> Result<Response, Error> {
     let input: ExchangeInput = parse_json(&body)?;
-    let link = match &input.link {
-        LinkInput::Order { token } => Link::Order(token),
-        LinkInput::WithdrawalRequest => Link::WithdrawalRequest,
+    let source = match &input.link {
+        LinkInput::Order { token } => Source::OrderLink(token),
+        LinkInput::WithdrawalRequest => Source::WithdrawalForm,
     };
     let granted = with_ctx(&s, &shopper, async |tx, ctx| {
-        link_access::exchange(tx, ctx, link, input.previous.as_deref()).await
+        link_access::exchange(tx, ctx, source, input.previous.as_deref()).await
     })
     .await?;
     let resource = match granted.scope {
