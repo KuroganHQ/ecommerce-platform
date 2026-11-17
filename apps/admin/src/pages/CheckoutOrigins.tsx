@@ -114,7 +114,7 @@ export default function CheckoutOrigins() {
       <PageHeader title={t("checkoutOrigins.title")} description={t("checkoutOrigins.lead")} />
       <QueryState query={origins}>
         {(data) => (
-          <div class="flex flex-col gap-3">
+          <>
             <Card title={t("checkoutOrigins.title")} count={data.items.length} padding="none">
               <Show
                 when={data.items.length > 0}
@@ -125,7 +125,7 @@ export default function CheckoutOrigins() {
                   />
                 }
               >
-                <div class="overflow-x-auto">
+                <div class="relative overflow-x-auto">
                   <table class={tableClass}>
                     <thead>
                       <tr>
@@ -141,7 +141,7 @@ export default function CheckoutOrigins() {
                       <For each={data.items}>
                         {(o) => (
                           <tr>
-                            <td class={`${tdClass} font-semibold break-all text-heading`}>
+                            <td class={`${tdClass} font-semibold whitespace-nowrap text-heading`}>
                               {o.origin}
                             </td>
                             <td class={tdClass}>
@@ -197,9 +197,9 @@ export default function CheckoutOrigins() {
               </Show>
             </Card>
             <Show when={!can("owner")}>
-              <p class="text-sm text-muted-foreground">{t("checkoutOrigins.ownerOnly")}</p>
+              <p class="mt-3 text-sm text-muted-foreground">{t("checkoutOrigins.ownerOnly")}</p>
             </Show>
-          </div>
+          </>
         )}
       </QueryState>
 
