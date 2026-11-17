@@ -51,6 +51,9 @@ import {
   identifyUrl,
   idtCookie,
   isIdentifyValue,
+  PLACEMENT_CALLBACK,
+  PLACEMENT_FAILED,
+  placementUrl,
 } from "./identify.ts";
 import {
   cleanUrl,
@@ -1371,6 +1374,7 @@ ${
         body: JSON.stringify(placeOrderBody(form)),
       }),
     );
+    if (res.status === 202) return confirmPlacement(site, res);
     const rotated = res.headers.get("x-cart-token");
     const refused = res.status === 409 || res.status === 422;
     const code = refused ? await refusalCode(res) : "failed";
@@ -1392,6 +1396,55 @@ ${
     if (res.status === 404 || (res.status === 409 && code === "order_already_placed"))
       return toCheckout();
     return draftPage(site, req, `error=${code}`, form, refused ? res.status : 502);
+  }
+
+  async function confirmPlacement(site: SameOriginSite, res: Response): Promise<Response> {
+    const state = ((await res.json().catch(() => null)) as { state?: unknown } | null)?.state;
+    const account = accountOrigin(site);
+    if (!account || !isIdentifyValue(state)) return seeOther(PLACEMENT_FAILED);
+    return seeOther(placementUrl(account, state, site.shopOrigin));
+  }
+
+  async function placementCallback(
+    site: SameOriginSite,
+    req: Request,
+    url: URL,
+  ): Promise<Response> {
+    if (req.method !== "GET") return text(405, "Method not allowed", { allow: "GET" });
+    const params = callbackParameters(url);
+    const cart = capabilityCookie(req, SAME_ORIGIN_CART_COOKIE);
+    if (!params || !cart) return seeOther(PLACEMENT_FAILED);
+    const res = await upstream(
+      new Request(`${opts.apiOrigin}/storefront/v1/checkout/placement/callback`, {
+        method: "POST",
+        headers: apiHeaders(site, {
+          "x-cart-token": cart,
+          "content-type": "application/json",
+          ...consentSubject(req),
+        }),
+        body: JSON.stringify(params),
+      }),
+    );
+    const rotated = res.headers.get("x-cart-token");
+    const placed =
+      res.status === 201
+        ? ((await res.json().catch(() => null)) as {
+            order_id?: unknown;
+            as_guest?: unknown;
+          } | null)
+        : null;
+    await res.body?.cancel().catch(() => undefined);
+    if (!placed) return seeOther(PLACEMENT_FAILED);
+    const headers = new Headers({
+      location:
+        placed.as_guest === false
+          ? (cleanUrl({ kind: "order", id: placed.order_id }) ?? "/checkout")
+          : "/checkout",
+      "cache-control": "no-store",
+    });
+    if (rotated && TOKEN_RE.test(rotated))
+      headers.append("set-cookie", sameOriginCartCookie(rotated));
+    return new Response(null, { status: 303, headers });
   }
 
   async function sameOriginOrderApi(
@@ -1920,6 +1973,7 @@ ${
       });
     if (url.pathname === IDENTIFY_CALLBACK) return identifyCallback(site, req, url);
     if (url.pathname === IDENTIFY_START) return identifyStart(site, req);
+    if (url.pathname === PLACEMENT_CALLBACK) return placementCallback(site, req, url);
     const ingress = linkIngress(url);
     if (ingress) {
       if (req.method !== "GET") return text(405, "Method not allowed", { allow: "GET" });

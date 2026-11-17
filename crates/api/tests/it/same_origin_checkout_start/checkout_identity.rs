@@ -3,12 +3,12 @@ use super::*;
 
 const ATTACKER_STATE: &str = "attackerstate_0123456789abcdef0123456789abcdef0123456789abcdef";
 
-struct Started {
-    state: String,
+pub(super) struct Started {
+    pub(super) state: String,
 }
 
 impl Ctx {
-    async fn signed_in(&self, email: &str) -> (String, Uuid) {
+    pub(super) async fn signed_in(&self, email: &str) -> (String, Uuid) {
         let (status, _, _) = self
             .edge
             .call(Call::post(
@@ -70,7 +70,7 @@ impl Ctx {
         .await
     }
 
-    async fn identify(&self, cart: &str) -> Started {
+    pub(super) async fn identify(&self, cart: &str) -> Started {
         let (status, body) = self.identify_start(cart).await;
         assert_eq!(status, StatusCode::CREATED, "{body}");
         Started {
@@ -78,7 +78,7 @@ impl Ctx {
         }
     }
 
-    async fn code(&self, session: &str, purpose: &str, state: &str) -> String {
+    pub(super) async fn code(&self, session: &str, purpose: &str, state: &str) -> String {
         let (status, body, _) = self
             .edge
             .call(Call::post(
@@ -105,7 +105,7 @@ impl Ctx {
         (status, text, replacement(&res))
     }
 
-    async fn identified(&self, cart: &str, state: &str, code: &str) -> String {
+    pub(super) async fn identified(&self, cart: &str, state: &str, code: &str) -> String {
         let (status, text, k) = self
             .callback(cart, json!({ "state": state, "idt": state, "code": code }))
             .await;
@@ -132,14 +132,14 @@ impl Ctx {
             .collect()
     }
 
-    async fn count(&self, sql: &'static str) -> i64 {
+    pub(super) async fn count(&self, sql: &'static str) -> i64 {
         let mut tx = platform::db::tenant_tx(&self.runtime, self.shop.tenant)
             .await
             .unwrap();
         sqlx::query_scalar(sql).fetch_one(&mut *tx).await.unwrap()
     }
 
-    async fn exec(&self, sql: &'static str) {
+    pub(super) async fn exec(&self, sql: &'static str) {
         let mut tx = platform::db::tenant_tx(&self.runtime, self.shop.tenant)
             .await
             .unwrap();
@@ -164,7 +164,7 @@ impl Ctx {
     }
 }
 
-async fn checkout_cart(c: &Ctx) -> String {
+pub(super) async fn checkout_cart(c: &Ctx) -> String {
     let shop = c.shop_cart().await;
     c.started(&shop, None).await
 }
@@ -484,6 +484,29 @@ async fn identify_prefill_has_no_account_visibility_or_side_effects(db: PgPool) 
     );
     let view = c.ready(&k, method).await;
     let (status, text, _) = c.place(&k, "identify-order", &place_body(&view, "")).await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{text}");
+    let state = serde_json::from_str::<Value>(&text).unwrap()["state"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let (status, body, _) = c
+        .edge
+        .call(Call::post(
+            "/storefront/v1/customer/account-codes",
+            json!({ "purpose": "placement", "state": state, "origin": c.edge.origin }),
+        ))
+        .send(&c.s)
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let (status, text, _) = c
+        .edge
+        .call(Call::post(
+            "/storefront/v1/checkout/placement/callback",
+            json!({ "state": state, "code": body["code"] }),
+        ))
+        .header("x-cart-token", k.clone())
+        .send_text(&c.s)
+        .await;
     assert_eq!(status, StatusCode::CREATED, "{text}");
 
     assert_eq!(

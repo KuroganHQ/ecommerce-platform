@@ -16,7 +16,7 @@ use commerce::checkout::{
     PlaceOrderInput, Placer, ShippingInput,
 };
 use commerce::checkout_access;
-use commerce::checkout_identity;
+use commerce::checkout_identity::{self, Placing};
 use commerce::customers;
 use commerce::idempotency;
 use commerce::money::MoneyView;
@@ -50,6 +50,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
         .routes(routes!(put_shipping))
         .routes(routes!(put_payment))
         .routes(routes!(place_order))
+        .routes(routes!(placement_callback))
         .routes(routes!(fake_pay_page, fake_pay))
 }
 
@@ -472,6 +473,7 @@ pub(crate) async fn start_payment(
     request_body = PlaceOrderInput,
     responses(
         (status = 201, body = PlacedOrder, headers(("X-Cart-Token" = String, description = "The replacing checkout capability when a same-origin placement wrote a note (C6; for the edge only)"))),
+        (status = 202, description = "A same-origin checkout linked to an account: no order yet; confirm the placement through the account origin (A2.4)", body = PlacementState),
         (status = 400, description = "idempotency_key_required", body = platform::Problem, content_type = "application/problem+json"),
         (status = 404, description = "No checkout cart", body = platform::Problem, content_type = "application/problem+json"),
         (status = 409, description = "order_already_placed | cart_changed | price_changed | insufficient_stock | out_of_stock | cart_unavailable | coupon_* | idempotency_conflict", body = platform::Problem, content_type = "application/problem+json"),
@@ -492,39 +494,38 @@ async fn place_order(
     let token = cart_token(&headers)?;
     let session = header_str(&headers, SESSION_HEADER);
     let hash = idempotency::request_hash(&body);
-    let (placed, page) = with_ctx(&s, &shopper, async |tx, ctx| {
+    let placing = with_ctx(&s, &shopper, async |tx, ctx| {
         let customer_id = match session {
             Some(t) => customers::authenticate(tx, t).await?.map(|s| s.customer_id),
             None => None,
         };
         let ip = ip_hash(tx, &headers).await?;
-        let placed = checkout::place_order(
-            tx,
-            ctx,
-            &s.checkout,
-            &token,
-            &key,
-            &hash,
-            &input,
-            &Placer {
-                customer_id,
-                ip_hash: ip.as_deref(),
-            },
-        )
-        .await?;
-        // WP20: the purchase for the ad platforms, in the placement transaction, only while
-        // the visitor's consent subject grants `ads` (checked again when sending).
-        if let Some(subject) = header_str(&headers, CONSENT_SUBJECT_HEADER) {
-            let ua = header_str(&headers, CLIENT_UA_HEADER);
-            commerce::adtracking::capture_purchase(tx, placed.order_id, subject, ua).await?;
+        let placer = Placer {
+            customer_id,
+            ip_hash: ip.as_deref(),
+        };
+        match checkout_identity::place(tx, ctx, &s.checkout, &token, &key, &hash, &input, &placer)
+            .await?
+        {
+            Placing::Confirm(state) => Ok(Err(state)),
+            Placing::Placed(placed) => {
+                capture_purchase(tx, &headers, placed.order_id).await?;
+                let page =
+                    commerce::order_access::page(tx, ctx, placed.order_id, &placed.token).await?;
+                Ok(Ok((placed, page)))
+            }
         }
-        let page = commerce::order_access::page(tx, ctx, placed.order_id, &placed.token).await?;
-        Ok((placed, page))
     })
     .await?;
-    if let Some(subject) = header_str(&headers, CONSENT_SUBJECT_HEADER) {
-        link_purchase(&s, shopper.tenant_id, placed.order_id, subject).await;
-    }
+    let (placed, page) = match placing {
+        Ok(placed) => placed,
+        Err(state) => {
+            return Ok(no_store(
+                (StatusCode::ACCEPTED, Json(PlacementState { state })).into_response(),
+            ));
+        }
+    };
+    link_after_commit(&s, &shopper, &headers, placed.order_id).await;
     let confirmation_url = page;
     let payment = start_payment(&s, shopper.tenant_id, placed.attempt_id, &confirmation_url).await;
     let mut res = (
@@ -548,6 +549,110 @@ async fn place_order(
         );
     }
     Ok(no_store(res))
+}
+
+async fn capture_purchase(
+    tx: &mut TenantTx,
+    headers: &HeaderMap,
+    order: Uuid,
+) -> Result<(), Error> {
+    if let Some(subject) = header_str(headers, CONSENT_SUBJECT_HEADER) {
+        let ua = header_str(headers, CLIENT_UA_HEADER);
+        commerce::adtracking::capture_purchase(tx, order, subject, ua).await?;
+    }
+    Ok(())
+}
+
+async fn link_after_commit(s: &AppState, shopper: &Shopper, headers: &HeaderMap, order: Uuid) {
+    if let Some(subject) = header_str(headers, CONSENT_SUBJECT_HEADER) {
+        link_purchase(s, shopper.tenant_id, order, subject).await;
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct PlacementState {
+    /// For the account origin round trip (`<account origin>/placement?state=…`).
+    pub state: String,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PlacementCallback {
+    /// From the callback URL.
+    #[serde(default)]
+    pub state: String,
+    /// The account origin's placement code, from the callback URL.
+    #[serde(default)]
+    pub code: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct ConfirmedPlacement {
+    pub order_id: Uuid,
+    pub number: String,
+    /// The account origin vouched for no account or another one: the order is a guest order.
+    pub as_guest: bool,
+}
+
+/// A2.4, same-origin mode: consumes the placement `state` and the account origin's placement
+/// code and places the order with the input reviewed when the state was created, in one
+/// transaction. The order belongs to the linked account only when the code vouches for it;
+/// otherwise it is a guest order (`as_guest`). A mismatched, unsolicited, reused or expired
+/// callback, or a capability rotation since the place-order POST, is `404` (or the placement's
+/// own `409`/`422`) and places nothing.
+#[utoipa::path(
+    post,
+    path = "/storefront/v1/checkout/placement/callback",
+    tag = "storefront",
+    params(StorefrontHeaders, CartHeader),
+    request_body = PlacementCallback,
+    responses(
+        (status = 201, body = ConfirmedPlacement, headers(("X-Cart-Token" = String, description = "The replacing checkout capability when the placement wrote a note (C6; for the edge only)"))),
+        (status = 403, description = "shop_origin_required | shop_origin_mismatch", body = platform::Problem, content_type = "application/problem+json"),
+        (status = 404, description = "Rejected", body = platform::Problem, content_type = "application/problem+json"),
+        (status = 409, description = "checkout_mode_changed | cart_changed | price_changed | insufficient_stock | out_of_stock | cart_unavailable | coupon_*", body = platform::Problem, content_type = "application/problem+json"),
+        (status = 422, description = "checkout_incomplete | ship_to_not_allowed", body = platform::Problem, content_type = "application/problem+json"),
+    )
+)]
+async fn placement_callback(
+    shopper: Shopper,
+    State(s): State<AppState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<Response, Error> {
+    let input: PlacementCallback = parse_json(&body)?;
+    let token = cart_token(&headers)?;
+    let confirmed = with_ctx(&s, &shopper, async |tx, ctx| {
+        let ip = ip_hash(tx, &headers).await?;
+        let confirmed = checkout_identity::confirm_placement(
+            tx,
+            ctx,
+            &s.checkout,
+            &token,
+            &input.state,
+            &input.code,
+            ip.as_deref(),
+        )
+        .await?;
+        capture_purchase(tx, &headers, confirmed.placement.order_id).await?;
+        Ok(confirmed)
+    })
+    .await?;
+    let placed = &confirmed.placement;
+    link_after_commit(&s, &shopper, &headers, placed.order_id).await;
+    let res = (
+        StatusCode::CREATED,
+        Json(ConfirmedPlacement {
+            order_id: placed.order_id,
+            number: placed.number.clone(),
+            as_guest: confirmed.as_guest,
+        }),
+    )
+        .into_response();
+    match &placed.rotated_capability {
+        Some(k) => with_capability(res, k),
+        None => Ok(no_store(res)),
+    }
 }
 
 /// A20: a consented visitor's purchase joins their analytics session (the funnel's last

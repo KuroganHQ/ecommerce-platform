@@ -280,6 +280,14 @@ describe("checkoutPage opens one editor from the view, edit and the draft", () =
     });
   });
 
+  test("a placement the account origin did not confirm is a page-level notice", () => {
+    expect(checkoutPage(BOTH, at("?error=placement_failed")).problem).toEqual({
+      step: null,
+      field: null,
+      message: "checkout.placement_failed",
+    });
+  });
+
   test.each(["failed", "nope", "toString", "__proto__", "constructor", "hasOwnProperty"])(
     "the code %s reads as failed",
     (code) => {
@@ -464,6 +472,9 @@ describe("the new checkout messages", () => {
     "checkout.saved_addresses",
     "checkout.use_address",
     "checkout.identify_failed",
+    "checkout.placement_failed",
+    "checkout.placed_as_guest",
+    "checkout.continue_to_order",
   ];
   const catalogs: [string, Record<string, string>][] = [
     ["en", en],

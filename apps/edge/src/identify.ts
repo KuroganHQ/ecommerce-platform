@@ -1,6 +1,8 @@
 export const IDENTIFY_START = "/checkout/identify/start";
 export const IDENTIFY_CALLBACK = "/checkout/identify";
 export const IDENTIFY_FAILED = "/checkout?error=identify_failed";
+export const PLACEMENT_CALLBACK = "/checkout/placement";
+export const PLACEMENT_FAILED = "/checkout?error=placement_failed";
 export const IDT_COOKIE = "__Host-Http-idt";
 
 const IDT_SECONDS = 300;
@@ -23,11 +25,16 @@ export function accountOrigin(site: {
   return url.origin;
 }
 
-export function identifyUrl(account: string, state: string, shopOrigin: string): string {
-  const url = new URL("/identify", account);
-  url.search = new URLSearchParams({ state, origin: shopOrigin }).toString();
-  return url.href;
+function accountRoundTrip(path: "/identify" | "/placement") {
+  return (account: string, state: string, shopOrigin: string): string => {
+    const url = new URL(path, account);
+    url.search = new URLSearchParams({ state, origin: shopOrigin }).toString();
+    return url.href;
+  };
 }
+
+export const identifyUrl = accountRoundTrip("/identify");
+export const placementUrl = accountRoundTrip("/placement");
 
 export function callbackParameters(url: URL): { state: string; code: string } | null {
   const params = [...url.searchParams];
