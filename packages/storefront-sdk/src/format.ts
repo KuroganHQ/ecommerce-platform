@@ -45,12 +45,13 @@ export function imageUrl(img: Image, width: number): string {
 
 /**
  * Attributes for an `<img>`: AVIF `srcset` (every current browser decodes AVIF; `src` is the
- * JPEG/PNG fallback), explicit dimensions (no CLS), lazy unless it is the LCP image. `sizes`
- * must describe the real slot: a loose guess makes the browser pick a 2-4× heavier variant.
+ * JPEG/PNG fallback), explicit dimensions (no CLS), lazy unless `eager` or `priority` (the LCP
+ * image, which also gets fetchpriority=high). `sizes` must describe the real slot: a loose guess
+ * makes the browser pick a 2-4× heavier variant.
  */
 export function imageAttrs(
   img: Image,
-  opts: { sizes: string; priority?: boolean; width?: number },
+  opts: { sizes: string; priority?: boolean; eager?: boolean; width?: number },
 ) {
   const width = opts.width ?? img.width;
   return {
@@ -60,7 +61,7 @@ export function imageAttrs(
     width,
     height: Math.round((img.height / img.width) * width),
     alt: img.alt,
-    loading: opts.priority ? ("eager" as const) : ("lazy" as const),
+    loading: opts.priority || opts.eager ? ("eager" as const) : ("lazy" as const),
     decoding: "async" as const,
     fetchpriority: opts.priority ? ("high" as const) : ("auto" as const),
   };

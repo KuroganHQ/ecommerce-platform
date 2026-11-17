@@ -78,7 +78,7 @@ const viewAll = (to: string) => ({ href: to, label: t("home.view_all") });
       {
         hero && (
           <div class="relative order-1 aspect-[4/3] md:order-2 md:aspect-auto md:min-h-[32rem]">
-            <img {...imageAttrs(hero, { sizes: HERO_SIZES, width: 640, priority: true })} loading="eager" class="absolute inset-0 size-full object-cover" />
+            <img {...imageAttrs(hero, { sizes: HERO_SIZES, width: 640, priority: true })} class="absolute inset-0 size-full object-cover" />
           </div>
         )
       }
@@ -94,7 +94,7 @@ const viewAll = (to: string) => ({ href: to, label: t("home.view_all") });
             <span class="font-display text-2xl leading-tight font-bold md:text-3xl">{lead.label}</span>
             <span class="btn btn-primary">{t("home.view_all")}</span>
           </span>
-          {lead.image && <img {...imageAttrs(lead.image, { sizes: PROMO_SIZES, width: 360, priority: !hero })} loading={hero ? "lazy" : "eager"} class="aspect-[4/5] w-full rounded-lg object-cover transition-transform duration-500 group-hover:scale-[1.03]" />}
+          {lead.image && <img {...imageAttrs(lead.image, { sizes: PROMO_SIZES, width: 360, priority: !hero })} class="aspect-[4/5] w-full rounded-lg object-cover transition-transform duration-500 group-hover:scale-[1.03]" />}
         </a>
         {
           side.length > 0 && (
