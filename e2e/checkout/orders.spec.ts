@@ -2,8 +2,8 @@
  * Checkout and order placement (WP10) against the seeded demo shop
  * (`make up && make seed`): guest checkout with a Packeta pickup point from
  * the mock widget and the fake gateway, the confirmation page and email, SK home delivery,
- * a failed payment retried, coupon + sale totals, a signed-in customer's account, and a guest
- * order linked after an email-link sign-in (A5).
+ * a failed payment retried, coupon + sale totals, guest-only checkout for a signed-in customer
+ * (SHOP-95), and a guest order linked after an email-link sign-in (A5).
  */
 
 import { randomBytes } from "node:crypto";
@@ -405,34 +405,27 @@ test("coupon and sale: the order totals match the cart", async ({ browser }) => 
   await page.context().close();
 });
 
-test("a signed-in customer finds the order in the account", async ({ browser }) => {
+test("checkout_is_guest_only_when_signed_in", async ({ browser }) => {
   const page = await newPage(browser);
   const email = `ucet-${run}@example.test`;
+  await signIn(page, email, "/account");
   await toCheckout(page, CZ, "tricko-henley");
-  await signIn(page, email, "/account/security");
-  const password = "správné koňské heslo";
-  await page.getByLabel("Nové heslo").fill(password);
-  await page.getByRole("button", { name: "Uložit heslo" }).click();
-  await expect(page.getByRole("status")).toContainText("Heslo je uložené");
-  await page.goto(`${checkoutOf(CZ)}/account?next=/`);
-  await page.locator("summary", { hasText: "Heslem" }).click();
-  await page.locator("details form").getByLabel("E-mail").fill(email);
-  await page.locator("details form").getByLabel("Heslo").fill(password);
-  await page.locator("details form").getByRole("button", { name: "Přihlásit se" }).click();
-  await page.waitForURL(`${checkoutOf(CZ)}/`);
-  await expect(page.getByText(`Nakupujete jako ${email}`)).toBeVisible();
-  await expect(page.locator('input[autocomplete="email"]')).toHaveValue(email);
-  await fillContactAndAddress(page, null);
+  await checkoutReady(page);
+  await expect(page.getByText(email)).toHaveCount(0);
+  await expect(page.getByText("Máte účet?")).toHaveCount(0);
+  await expect(page.getByLabel("Uložená adresa")).toHaveCount(0);
+  await expect(page.locator('input[autocomplete="email"]')).toHaveValue("");
+  await expect(page.getByRole("link", { name: "Můj účet" })).toHaveAttribute(
+    "href",
+    `${ACCOUNT}/account`,
+  );
+  await fillContactAndAddress(page, email);
   await choosePickupPoint(page, /Z-BOX Praha 1/);
   await page.getByRole("radio", { name: /Testovací platba/ }).check();
   await acceptAndPlace(page);
   const token = await fakePay(page, "Pay");
   const o = await order(page, CZ, token);
-  await page.goto(`${ACCOUNT}/account`);
-  await expect(page.getByTestId("account-orders")).toContainText(o.number);
-  await page.getByRole("link", { name: `Zobrazit ${o.number}` }).click();
-  await expect(page.getByRole("heading", { level: 1 })).toContainText(o.number);
-  await expectAccessible(page, "account order");
+  expect(sql(`SELECT customer_id IS NULL FROM orders WHERE number = '${o.number}'`)).toBe("t");
   await page.context().close();
 });
 
