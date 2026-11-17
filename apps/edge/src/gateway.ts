@@ -1304,7 +1304,7 @@ ${
     });
   }
 
-  async function identifyCallback(site: SameOriginSite, req: Request, url: URL) {
+  async function identifyCallback(site: SameOriginSite, req: Request, url: URL): Promise<Response> {
     if (req.method !== "GET") return text(405, "Method not allowed", { allow: "GET" });
     const params = callbackParameters(url);
     const cart = capabilityCookie(req, SAME_ORIGIN_CART_COOKIE);

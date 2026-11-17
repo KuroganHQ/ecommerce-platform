@@ -216,8 +216,7 @@ async fn post_details(
     with_capability(StatusCode::NO_CONTENT.into_response(), &rotated)
 }
 
-fn with_capability(res: Response, capability: &str) -> Result<Response, Error> {
-    let mut res = res;
+fn with_capability(mut res: Response, capability: &str) -> Result<Response, Error> {
     res.headers_mut().insert(
         CART_HEADER,
         HeaderValue::from_str(capability).map_err(|e| Error::Internal(e.to_string()))?,
