@@ -60,8 +60,6 @@ export function cleanUrl(resource: unknown): string | null {
 export const grantCookie = (grant: string) =>
   `${LINK_GRANT_COOKIE}=${grant}; Path=/; HttpOnly; Secure; SameSite=Lax`;
 
-export const CLEAR_GRANT_COOKIE = `${LINK_GRANT_COOKIE}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`;
-
 export const REOPEN_LINK_PAGE = `<!doctype html><html lang="cs"><meta charset="utf-8"><meta name="robots" content="noindex">
 <title>Odkaz už neplatí</title>
 <main><h1>Odkaz už neplatí</h1>

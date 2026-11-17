@@ -118,7 +118,6 @@ export const REVOKED_CAPABILITY = "sameorigintoken_revoked_00000000001";
 export const ORDER_LINK = "1f".repeat(32);
 export const EVIL_LINK = "e7".repeat(32);
 export const LINK_THROWS = "5a".repeat(32);
-export const REPLACED_LINK = "3c".repeat(32);
 export const LINK_GRANT = "9c".repeat(32);
 export const ORDER_ID = "0b2a3f1e-6c4d-4e8a-9b1c-2d3e4f5a6b7c";
 
@@ -282,7 +281,6 @@ export function fakeApi() {
       const token = (JSON.parse(calls.at(-1)?.body || "{}") as { link?: { token?: string } }).link
         ?.token;
       if (token === LINK_THROWS) throw new Error(`upstream failed for /o/${token}`);
-      if (token === REPLACED_LINK) return Response.json({ code: "link_replaced" }, { status: 409 });
       const id = token === ORDER_LINK ? ORDER_ID : token === EVIL_LINK ? "//evil.example" : null;
       if (!id) return Response.json({ code: "not_found", detail: `no ${token}` }, { status: 404 });
       return Response.json(

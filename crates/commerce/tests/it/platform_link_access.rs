@@ -300,61 +300,57 @@ async fn read_queued_behind_replacement_fails(db: PgPool) {
 }
 
 #[sqlx::test(migrations = "../../migrations")]
-async fn concurrent_replacements_leave_one_live_successor(db: PgPool) {
+async fn concurrent_exchanges_both_revoke_the_cookies_grant(db: PgPool) {
     let runtime = testkit::runtime_pool(&db, 4).await;
     let (shop, at) = same_origin(&runtime, "lgtwice").await;
     let (a, token) = order(&runtime, &shop).await;
-    let (first, _) = at
+    let (held, _) = at
         .exchange(&runtime, Source::OrderLink(&token), None)
         .await
         .unwrap();
 
-    let (mut winning, ctx) = at.tx(&runtime).await;
-    let winner = link_access::exchange(&mut winning, &ctx, Source::OrderLink(&token), Some(&first))
+    let (mut first_tx, ctx) = at.tx(&runtime).await;
+    let first = link_access::exchange(&mut first_tx, &ctx, Source::OrderLink(&token), Some(&held))
         .await
         .unwrap();
-    let winning_pid = pid(&mut winning).await;
+    let first_pid = pid(&mut first_tx).await;
     let (pid_tx, pid_rx) = oneshot::channel();
-    let losing = tokio::spawn({
-        let (runtime, at, token, first) =
-            (runtime.clone(), at.clone(), token.clone(), first.clone());
+    let second = tokio::spawn({
+        let (runtime, at, token, held) = (runtime.clone(), at.clone(), token.clone(), held.clone());
         async move {
             let (mut tx, ctx) = at.tx(&runtime).await;
             pid_tx.send(pid(&mut tx).await).unwrap();
-            let r = link_access::exchange(&mut tx, &ctx, Source::OrderLink(&token), Some(&first))
+            let r = link_access::exchange(&mut tx, &ctx, Source::OrderLink(&token), Some(&held))
                 .await
                 .map(|g| g.token);
             tx.commit().await.unwrap();
             r
         }
     });
-    blocked_by(&db, pid_rx.await.unwrap(), winning_pid).await;
-    winning.commit().await.unwrap();
-
-    let lost = losing.await.unwrap();
-    assert!(
-        matches!(&lost, Err(Error::Conflict { code, .. }) if *code == "link_replaced"),
-        "the lost replacement mints no grant: {lost:?}"
-    );
-    assert!(
-        at.authorize(&runtime, &winner.token, Scope::OrderRead(a))
-            .await
-            .is_ok(),
-        "the winning successor reads"
-    );
-    assert!(not_found(
-        &at.authorize(&runtime, &first, Scope::OrderRead(a)).await
-    ));
-    let (fresh, _) = at
-        .exchange(&runtime, Source::OrderLink(&token), Some(&winner.token))
+    blocked_by(&db, pid_rx.await.unwrap(), first_pid).await;
+    first_tx.commit().await.unwrap();
+    let second = second
         .await
-        .unwrap();
+        .unwrap()
+        .expect("the queued exchange succeeds too");
+
     assert!(
-        at.authorize(&runtime, &fresh, Scope::OrderRead(a))
-            .await
-            .is_ok(),
-        "a later open replaces the winner normally"
+        not_found(&at.authorize(&runtime, &held, Scope::OrderRead(a)).await),
+        "the grant the cookie held authorizes nothing"
     );
+    assert_ne!(
+        first.token, second,
+        "each exchange answers with its own grant"
+    );
+    for (what, grant) in [("first", &first.token), ("second", &second)] {
+        assert_ne!(grant, &held, "{what} is not the revoked grant");
+        assert!(
+            at.authorize(&runtime, grant, Scope::OrderRead(a))
+                .await
+                .is_ok(),
+            "{what} exchange's own grant reads"
+        );
+    }
 }
 
 #[sqlx::test(migrations = "../../migrations")]

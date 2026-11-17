@@ -14,7 +14,6 @@ import {
   ORDER_ID,
   ORDER_LINK,
   platformCheckoutWorker,
-  REPLACED_LINK,
   site,
 } from "./fixtures.ts";
 
@@ -192,18 +191,6 @@ describe("an emailed order link becomes a grant cookie on a clean URL (C5)", () 
       expect(res.headers.getSetCookie(), link).toEqual([]);
       expectNoSecret(res, await res.text(), link);
     }
-  });
-
-  test("a replacement that lost a race clears the grant cookie and shows the reopen page", async () => {
-    const res = await get(`${FRESH}/o/${REPLACED_LINK}`, {
-      ...NAVIGATE,
-      cookie: `__Host-Http-cap=${OLD_GRANT}`,
-    });
-    expect(res.status).toBe(303);
-    expect(res.headers.get("location")).toBe("/o");
-    expect(res.headers.getSetCookie()).toEqual([
-      "__Host-Http-cap=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0",
-    ]);
   });
 
   test.each([

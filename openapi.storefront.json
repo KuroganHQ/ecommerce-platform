@@ -3974,7 +3974,7 @@
             }
           },
           "409": {
-            "description": "checkout_mode_changed | link_replaced",
+            "description": "checkout_mode_changed",
             "content": {
               "application/problem+json": {
                 "schema": {
