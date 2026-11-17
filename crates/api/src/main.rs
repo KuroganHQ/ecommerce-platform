@@ -232,8 +232,9 @@ async fn serve() -> anyhow::Result<()> {
             "AUTH_INTERNAL_URL/AUTH_INTERNAL_TOKEN not set: staff invitations answer 503"
         );
     }
+    let checkout_cfg = CheckoutConfig::from_env(cfg.env)?;
     let checkout = Arc::new(checkout_settings(
-        &CheckoutConfig::from_env(cfg.env)?,
+        &checkout_cfg,
         &PaymentsConfig::from_env(cfg.env)?,
         &ops,
     )?);
@@ -247,6 +248,7 @@ async fn serve() -> anyhow::Result<()> {
     }
     let state = api::AppState {
         fetch: platform::http::SafeClient::from_env()?,
+        same_origin_ready: checkout_cfg.same_origin_ready,
         experiments,
         auth_service,
         db: db.clone(),

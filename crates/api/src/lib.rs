@@ -112,6 +112,7 @@ pub struct AppState {
     pub carriers: Option<commerce::carriers::Carriers>,
     pub experiments: Option<commerce::experiments::ExperimentKey>,
     pub fetch: platform::http::SafeClient,
+    pub same_origin_ready: bool,
 }
 
 #[derive(Clone)]

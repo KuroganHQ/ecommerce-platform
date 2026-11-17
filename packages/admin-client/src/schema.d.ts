@@ -711,6 +711,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/v1/checkout-origins": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The checkout policy of each exact origin of the shop (owner/admin). */
+        get: operations["list_checkout_origins"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/checkout-origins/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Records the origin's full history (owner, login at most 15 minutes old): the platform claim
+         *     of a platform hostname, or the merchant's attestation for a custom domain. Changes no mode.
+         */
+        post: operations["record_origin_history"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/checkout-origins/mode": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Switches one exact origin between isolated and same-origin checkout (owner, login at most
+         *     15 minutes old), audited. Revokes every open checkout, link grant, identify and placement
+         *     state of the shop, aliases included, and purges the edge's caches of the shop. Same-origin
+         *     needs a known history and the platform's readiness; switching back to isolated needs
+         *     neither. The current mode is a no-op.
+         */
+        post: operations["switch_checkout_mode"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/v1/cod-reports": {
         parameters: {
             query?: never;
@@ -5820,6 +5880,17 @@ export interface components {
             id: string;
             status: components["schemas"]["AttemptStatus"];
         };
+        Attestation: {
+            /** Format: date-time */
+            at: string;
+            /** @description The staff user who attested. */
+            by: string;
+            /**
+             * Format: int32
+             * @description The version of the attestation text they accepted.
+             */
+            version: number;
+        };
         AuditEntry: {
             action: string;
             /** @description Better Auth user id, or `platform` for superadmin operations. */
@@ -6390,6 +6461,23 @@ export interface components {
          * @enum {string}
          */
         CheckoutMode: "isolated" | "same_origin";
+        CheckoutModeInput: {
+            mode: components["schemas"]["CheckoutMode"];
+            /** @description The exact origin as browsers serialize it (`https://shop.example`). */
+            origin: string;
+        };
+        /** @description The checkout policy of one exact origin of the tenant, as the admin sees it. */
+        CheckoutOrigin: {
+            attestation?: components["schemas"]["Attestation"] | null;
+            history: components["schemas"]["OriginHistory"];
+            mode: components["schemas"]["CheckoutMode"];
+            /** Format: int64 */
+            mode_generation: number;
+            origin: string;
+        };
+        CheckoutOriginList: {
+            items: components["schemas"]["CheckoutOrigin"][];
+        };
         CheckoutOriginPolicy: {
             /** @description The origin itself in same-origin mode, `checkout.<host>` in isolated mode. */
             checkout_origin: string;
@@ -8677,6 +8765,21 @@ export interface components {
             total: components["schemas"]["MoneyView"];
             vat: components["schemas"]["VatRow"][];
             vat_total: components["schemas"]["MoneyView"];
+        };
+        /**
+         * @description What is known about everything an exact origin ever served (same-origin-checkout.md, C3).
+         * @enum {string}
+         */
+        OriginHistory: "unknown_or_used" | "platform_never_reassigned" | "merchant_attested_never_served";
+        OriginHistoryInput: {
+            /**
+             * Format: int32
+             * @description The full-history attestation version the merchant accepted: required for a custom
+             *     domain, refused for a platform hostname.
+             */
+            attestation_version?: number | null;
+            /** @description The exact origin as browsers serialize it (`https://shop.example`). */
+            origin: string;
         };
         /**
          * @description Outcome of a payment attempt reported by a provider.
@@ -12793,6 +12896,171 @@ export interface operations {
                 };
             };
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    list_checkout_origins: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description The tenant to act in; the caller must be a member. */
+                "X-Tenant-Id": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CheckoutOriginList"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    record_origin_history: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description The tenant to act in; the caller must be a member. */
+                "X-Tenant-Id": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OriginHistoryInput"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CheckoutOrigin"];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description origin_history_unknown, platform_hostname */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description attestation_required, unsupported_attestation_version */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    switch_checkout_mode: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description The tenant to act in; the caller must be a member. */
+                "X-Tenant-Id": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CheckoutModeInput"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CheckoutOrigin"];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description origin_history_unknown, checkout_not_ready */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -43,13 +43,15 @@ pub async fn may_pay(
     checkout: Option<&str>,
     customer: Option<Uuid>,
 ) -> Result<bool, Error> {
-    if same_origin(tx, ctx).await? {
-        return match checkout {
-            Some(checkout) => pays(tx, ctx, order, checkout).await,
-            None => Ok(false),
-        };
+    if let Some(checkout) = checkout
+        && ctx.origin.is_some()
+        && pays(tx, ctx, order, checkout).await?
+    {
+        return Ok(true);
     }
-    orders::may_pay(tx, order, checkout, customer).await
+    Ok(customer.is_some()
+        && !same_origin(tx, ctx).await?
+        && orders::customer_of(tx, order).await? == customer)
 }
 
 pub async fn page(

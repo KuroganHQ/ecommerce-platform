@@ -1,0 +1,100 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT origin AS \"origin!\", mode, mode_generation, history, attested_by, attested_at,\n                  attestation_version\n           FROM platform.checkout_origins WHERE tenant_id = $1 ORDER BY origin",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "origin!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "platform.checkout_origins",
+            "name": "origin"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "mode",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "platform.checkout_origins",
+            "name": "mode"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "mode_generation",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "platform.checkout_origins",
+            "name": "mode_generation"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "history",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "platform.checkout_origins",
+            "name": "history"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "attested_by",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "platform.checkout_origins",
+            "name": "attested_by"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "attested_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "platform.checkout_origins",
+            "name": "attested_at"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "attestation_version",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "platform.checkout_origins",
+            "name": "attestation_version"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "7cd37df221412a954c8bbe10abb5155b40c34646d47ba6ce9022c3bdd89392fd"
+}

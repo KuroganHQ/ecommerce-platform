@@ -1096,24 +1096,25 @@ async fn same_origin_checkout(
     origin: &commerce::checkout_access::ShopOrigin,
 ) {
     sqlx::query(
-        "UPDATE platform.checkout_origins SET history = 'merchant_attested_never_served',
-             attested_by = 'user-owner', attested_at = now(), attestation_version = 1
+        "UPDATE platform.checkout_origins SET history = 'platform_never_reassigned'
          WHERE origin = $1",
     )
     .bind(origin.as_str())
     .execute(&c.owner)
     .await
     .unwrap();
+    let mut tx = platform::db::tenant_tx(&c.runtime, tenant).await.unwrap();
     assert!(
         commerce::checkout_access::switch_mode(
-            &c.runtime,
-            tenant,
+            &mut tx,
+            "test",
             origin,
             commerce::tenancy::CheckoutMode::SameOrigin,
         )
         .await
         .unwrap()
     );
+    tx.commit().await.unwrap();
 }
 
 fn account_code(purpose: &str, state: &str, origin: &str) -> Call<'static> {

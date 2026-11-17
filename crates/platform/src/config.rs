@@ -450,6 +450,9 @@ pub struct CheckoutConfig {
     pub packeta_widget_url: Option<Url>,
     /// `PACKETA_API_KEY`: the widget's public API key.
     pub packeta_api_key: Option<String>,
+    /// `SAME_ORIGIN_CHECKOUT_READY=1`: the operator declares every same-origin checkout setting
+    /// provisioned (SHOP-54), so the admin may switch an eligible origin to same-origin checkout.
+    pub same_origin_ready: bool,
 }
 
 impl CheckoutConfig {
@@ -485,11 +488,25 @@ impl CheckoutConfig {
             None => None,
             Some(_) => Some(url(lookup, "PACKETA_WIDGET_URL")?),
         };
+        let same_origin_ready = match get(lookup, "SAME_ORIGIN_CHECKOUT_READY")
+            .as_deref()
+            .map(str::trim)
+        {
+            None | Some("0" | "false") => false,
+            Some("1" | "true") => true,
+            Some(other) => {
+                return Err(ConfigError::Invalid {
+                    name: "SAME_ORIGIN_CHECKOUT_READY",
+                    reason: format!("expected 1 or 0, got {other:?}"),
+                });
+            }
+        };
         Ok(Self {
             payments_fake,
             fake_secret,
             packeta_widget_url,
             packeta_api_key: get(lookup, "PACKETA_API_KEY"),
+            same_origin_ready,
         })
     }
 }

@@ -13,6 +13,8 @@ use uuid::Uuid;
 use crate::common::*;
 
 mod checkout_identity;
+mod checkout_mode_switch;
+mod checkout_origins;
 mod checkout_placement_identity;
 mod link_grants;
 mod marketing_links;
@@ -46,8 +48,9 @@ struct Ctx {
 
 async fn setup(db: PgPool, mode: CheckoutMode) -> Ctx {
     let jwks = jwks_server(json!([jwk("a", X_A)])).await;
-    let runtime = testkit::runtime_pool(&db, 4).await;
+    let runtime = testkit::runtime_pool(&db, 10).await;
     let shop = testkit::storefront::shop(&runtime, "shop").await;
+    testkit::staff(&runtime, shop.tenant, checkout_origins::OWNER, "owner").await;
     let c = Ctx {
         s: state(runtime.clone(), &jwks, Duration::from_secs(30)),
         edge: Edge {
@@ -103,20 +106,17 @@ async fn waiting_on(db: &PgPool, blocker: i32) {
 
 impl Ctx {
     async fn switch(&self, mode: CheckoutMode) {
-        sqlx::query(
-            "UPDATE platform.checkout_origins SET history = 'merchant_attested_never_served',
-                 attested_by = 'user-owner', attested_at = now(), attestation_version = 1
-             WHERE origin = $1",
-        )
-        .bind(self.shop.origin.as_str())
-        .execute(&self.runtime)
-        .await
-        .unwrap();
-        let changed =
-            checkout_access::switch_mode(&self.runtime, self.shop.tenant, &self.shop.origin, mode)
-                .await
-                .unwrap();
-        assert!(changed, "switched to {mode:?}");
+        let origin = self.shop.origin.as_str();
+        self.platform_history(origin).await;
+        let before = self.origin(origin).await["mode_generation"].clone();
+        let (status, after) = self.set_mode(origin, mode.as_str()).await;
+        assert_eq!(status, StatusCode::OK, "{after}");
+        assert_eq!(after["mode"], mode.as_str());
+        assert_eq!(
+            after["mode_generation"],
+            json!(before.as_i64().unwrap() + 1),
+            "switched to {mode:?}"
+        );
     }
 
     async fn call(&self, call: Call<'_>, cart: &str) -> (StatusCode, Value) {

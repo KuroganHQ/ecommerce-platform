@@ -77,6 +77,15 @@ pub async fn shop(runtime: &PgPool, slug: &str) -> Shop {
         (format!("{slug}-sk.localhost"), sk),
     ] {
         sqlx::query(
+            "INSERT INTO platform.hostname_claims (hostname, tenant_id, platform_issued)
+             VALUES ($1, $2, true)",
+        )
+        .bind(&host)
+        .bind(tenant)
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+        sqlx::query(
             "INSERT INTO platform.domains (hostname, tenant_id, market_id, is_primary, verified_at)
              VALUES ($1, $2, $3, true, now())",
         )

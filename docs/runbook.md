@@ -227,6 +227,34 @@ Test refusals, truncated responses, repair exhaustion and cancellation with a re
 a disposable shop before enabling the feature for merchants. A successful fake-provider run
 does not measure model quality or production cost.
 
+## 6e. Checkout mode per shop origin (SHOP-54)
+
+Every exact shop origin has a checkout mode (`isolated` by default: checkout on `checkout.<shop>`,
+or `same_origin`), a recorded history and a mode generation (`same-origin-checkout.md`, C3 and
+Routing). Nothing switches by itself: domain verification and migrations leave every origin isolated.
+
+1. **Readiness.** `SAME_ORIGIN_CHECKOUT_READY=1` on the API is the operator's statement that every
+   same-origin setting is provisioned: `EDGE_PAGE_TOKEN_SECRET`, the account origin and its callbacks,
+   the active checkout build, Stripe and Packeta for the shop origin. Without it a switch to
+   same-origin answers `409 checkout_not_ready`. Leave it unset in production until SHOP-54's
+   release gates (slice 18, operator gates) pass.
+2. **History** (owner, login under 15 minutes): `POST /admin/v1/checkout-origins/history` with
+   `{"origin": "https://shop.example"}` for a platform hostname, which the platform claim of the
+   tenant must cover from its first response (hostnames from before SHOP-54 have no complete claim
+   and stay `unknown_or_used`). A custom domain needs `"attestation_version": 1`, the merchant's
+   acceptance of: "I know the full history of this exact web address. It never served a website
+   outside this platform, under me or an earlier owner." Recording history changes no mode.
+3. **Switch** (owner, login under 15 minutes): `POST /admin/v1/checkout-origins/mode` with
+   `{"origin": ..., "mode": "same_origin" | "isolated"}`. It ends every checkout in progress on the
+   shop, on all its domains: open checkouts, link grants, identify and placement states stop working
+   in the switch's transaction, and customers start checkout again. Emailed order links keep working.
+   The edge's resolver and page caches of the shop are purged; correctness never depends on the purge.
+4. **Rollback** is the same call with `"isolated"`: no readiness needed, the same revocation. Provision
+   and verify DNS and TLS for `checkout.<shop>` first, or isolated checkout has no host.
+
+Both calls are audited (`checkout_origin.history_recorded`, `checkout_origin.mode_switched`). The lock
+order every checkout transaction follows is in the `checkout_access` module docs.
+
 ## 7. Backups and restore
 
 ### Local (A29)

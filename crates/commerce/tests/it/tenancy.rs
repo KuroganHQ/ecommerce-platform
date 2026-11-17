@@ -645,19 +645,28 @@ async fn merchant_attestation_needs_actor_time_and_version(db: PgPool) {
     tenancy::create_tenant(&runtime, &owner("alpha"))
         .await
         .unwrap();
-    tenancy::add_domain(&runtime, "alpha", "alpha-shop.localhost", None, false)
-        .await
-        .unwrap();
+    for host in ["shop.alpha.example", "legacy-alpha.localhost"] {
+        tenancy::add_domain(&runtime, "alpha", host, None, false)
+            .await
+            .unwrap();
+    }
     for incomplete in [
         "history = 'merchant_attested_never_served'",
         "history = 'merchant_attested_never_served', attested_by = 'user-owner', attested_at = now()",
         "attested_by = 'user-owner'",
     ] {
-        refused(&runtime, "https://alpha-shop.localhost", incomplete).await;
+        refused(&runtime, "https://shop.alpha.example", incomplete).await;
     }
+    refused(
+        &runtime,
+        "https://legacy-alpha.localhost",
+        "history = 'merchant_attested_never_served', attested_by = 'user-owner',
+         attested_at = now(), attestation_version = 1",
+    )
+    .await;
     set_policy(
         &runtime,
-        "https://alpha-shop.localhost",
+        "https://shop.alpha.example",
         "history = 'merchant_attested_never_served', attested_by = 'user-owner',
          attested_at = now(), attestation_version = 1, mode = 'same_origin'",
     )
