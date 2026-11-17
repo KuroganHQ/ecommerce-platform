@@ -9,6 +9,8 @@ interface Props {
   lang?: string;
   /** Localized "My account" (from the shop's messages). */
   accountLabel?: string;
+  /** The market's account origin (`shop.account_url`); relative without one. */
+  accountUrl?: string | undefined;
   withdrawalLabel?: string;
   withdrawUrl?: string;
   /** The two-column checkout needs more room than the account pages. */
@@ -22,6 +24,7 @@ const {
   shopUrl,
   lang = "cs",
   accountLabel = "Můj účet",
+  accountUrl,
   withdrawalLabel = "Odstoupení od smlouvy",
   withdrawUrl = "/withdraw",
   wide = false,
@@ -51,7 +54,9 @@ const fresh =
         {
           platformLinks && (
             <nav aria-label={accountLabel} class="flex gap-4 text-sm">
-              <a href="/account" class="underline-offset-4 hover:underline">{accountLabel}</a>
+              <a href={`${accountUrl ?? ""}/account`} class="underline-offset-4 hover:underline">
+                {accountLabel}
+              </a>
             </nav>
           )
         }

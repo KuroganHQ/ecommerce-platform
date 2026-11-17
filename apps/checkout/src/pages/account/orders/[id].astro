@@ -27,6 +27,7 @@ Astro.response.headers.set("Cache-Control", "no-store");
   {...accountLinks(shop, Astro.url)}
   lang={shop?.locale ?? "cs"}
   accountLabel={t(m, "account.nav")}
+  accountUrl={shop?.account_url}
   withdrawalLabel={t(m, "withdraw.title")}
   wide
 >

@@ -7,8 +7,7 @@ import { checkoutApi, messages, shopUrl } from "../lib/api";
 
 // One-page checkout (spec §9.4, WP10) of the cart handed off from the shop (A1).
 const api = checkoutApi(Astro.request);
-const [shop, view, me] = await Promise.all([api.shop(), api.checkout(), api.me()]);
-const saved = me ? await api.addresses() : [];
+const [shop, view] = await Promise.all([api.shop(), api.checkout()]);
 const m = shop?.messages ?? {};
 const back = shopUrl(Astro.url);
 ---
@@ -19,6 +18,7 @@ const back = shopUrl(Astro.url);
   shopUrl={back}
   lang={shop?.locale ?? "cs"}
   accountLabel={t(m, "account.nav")}
+  accountUrl={shop?.account_url}
   wide
 >
   <h1 class="mb-4 font-display text-2xl font-bold">{t(m, "checkout.title")}</h1>
@@ -31,7 +31,7 @@ const back = shopUrl(Astro.url);
       </p>
       </>
     ) : (
-      <OpenCheckout shop={shop} view={view} customerEmail={me?.email} saved={saved} shopUrl={back} />
+      <OpenCheckout shop={shop} view={view} shopUrl={back} />
     )
   }
 </Checkout>

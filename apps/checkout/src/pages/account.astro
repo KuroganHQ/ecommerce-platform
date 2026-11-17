@@ -32,6 +32,7 @@ const links = [
   {...accountLinks(shop, Astro.url)}
   lang={shop?.locale ?? "cs"}
   accountLabel={t(m, "account.nav")}
+  accountUrl={shop?.account_url}
 >
   {
     me ? (
