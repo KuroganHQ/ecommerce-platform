@@ -162,8 +162,6 @@ pub fn checkout_base(shop_base: &str) -> String {
     }
 }
 
-/// A platform page or operation that mail, a mail header or the page model links to, named by
-/// purpose so each checkout mode maps it in one place (operator default 16).
 #[derive(Debug, Clone, Copy)]
 pub enum PlatformLink<'a> {
     /// The page model's `checkout_url`: the C10 start in same-origin mode, the bare checkout
@@ -226,10 +224,10 @@ impl PlatformLinks {
 /// The platform links of `ctx.origin`: the origin the edge served, or the one a background
 /// job's resource was made on. Without one, the market's canonical origin.
 pub async fn links(tx: &mut TenantTx, ctx: &Context) -> Result<PlatformLinks, Error> {
-    let origin = ctx
-        .origin
-        .as_ref()
-        .map_or(ctx.base_url.as_str(), crate::checkout_access::ShopOrigin::as_str);
+    let origin = ctx.origin.as_ref().map_or(
+        ctx.base_url.as_str(),
+        crate::checkout_access::ShopOrigin::as_str,
+    );
     let same_origin = sqlx::query_scalar!(
         r#"SELECT 1 AS "one!" FROM platform.checkout_origins
            WHERE origin = $1 AND tenant_id = $2 AND market_id = $3 AND mode = 'same_origin'"#,

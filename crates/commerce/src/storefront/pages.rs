@@ -15,8 +15,8 @@ use super::images::Image;
 use super::listing::{self, Facet, FacetKind, ListingQuery, PER_PAGE, Sort};
 use super::product::{breadcrumb_ld, category_trail, home_link};
 use super::{
-    Alternate, CacheHints, Context, Link, PlatformLink, Search, Seo, alternates, locale_path, messages,
-    plain_excerpt,
+    Alternate, CacheHints, Context, Link, PlatformLink, Search, Seo, alternates, locale_path,
+    messages, plain_excerpt,
 };
 use crate::catalog::{I18n, check_i18n};
 use crate::checkout::i18n_text;

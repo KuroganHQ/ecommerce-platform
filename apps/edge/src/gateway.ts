@@ -240,10 +240,6 @@ const ACCOUNT_PAGE_RE =
   /^\/account(?:\/(?:addresses|security|verify|consent)|\/orders\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})?$/;
 /** Where the fake pay page may send the customer back to: the order page only. */
 const ORDER_PAGE_RE = /^\/o\/[0-9a-f]{64}$/;
-/**
- * Old `checkout.<shop>` page paths and their shop paths once the shop is same-origin
- * (decision Routing, operator default 1). `/o/<token>` keeps its path; anything else is 404.
- */
 const LEGACY_CHECKOUT_PAGES = new Map([
   ["/", "/checkout"],
   ["/withdraw", "/withdraw"],
@@ -2469,11 +2465,6 @@ ${
     return pub;
   }
 
-  /**
-   * `checkout.<shop>` of a same-origin shop: the old one-click POSTs keep their bearer-only
-   * handlers (default 12), known pages answer 308 to the mapped shop path, everything else
-   * (the handoff included) 404. The target is the resolved shop origin, never the request path.
-   */
   function legacyCheckout(
     site: SameOriginSite,
     req: Request,
@@ -2486,9 +2477,8 @@ ${
       return newsletterLinks(site, req, url, "unsubscribe", host, port);
     if (req.method === "POST" && p === "/_p/flows/unsubscribe")
       return flowLink(site, req, url, host, port);
-    const page = req.method === "GET" || req.method === "HEAD";
-    const to = page && (ORDER_PAGE_RE.test(p) ? p : LEGACY_CHECKOUT_PAGES.get(p));
-    if (!to) return text(404, "Not found");
+    const to = ORDER_PAGE_RE.test(p) ? p : LEGACY_CHECKOUT_PAGES.get(p);
+    if (!to || (req.method !== "GET" && req.method !== "HEAD")) return text(404, "Not found");
     return new Response(null, {
       status: 308,
       headers: {

@@ -14,10 +14,10 @@ use uuid::Uuid;
 
 use crate::capability;
 use crate::cart;
+use crate::checkout_access::ShopOrigin;
 use crate::consent::{self, ConsentPurpose, Subject};
 use crate::link_access::{self, Scope};
 use crate::notifications::{self, Brand, Email, Template};
-use crate::checkout_access::ShopOrigin;
 use crate::storefront::{self, Context, PlatformLink, PublicUrls};
 
 pub const EVENT_JOB: &str = "flows.event";

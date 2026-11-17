@@ -1,6 +1,3 @@
-//! SHOP-141: every emailed platform link points at the origin the mail belongs to, in that
-//! origin's checkout mode. Isolated origins keep today's `checkout.<shop>` URLs.
-
 use std::collections::BTreeSet;
 
 use chrono::{Duration, Utc};
@@ -40,7 +37,6 @@ fn isolated(origin: &ShopOrigin) -> String {
     origin.as_str().replacen("://", "://checkout.", 1)
 }
 
-/// The origins of every platform link in a rendered mail (text, HTML or header).
 fn platform_origins(body: &str) -> BTreeSet<String> {
     body.split(|c: char| c.is_whitespace() || matches!(c, '"' | '\'' | '<' | '>' | '(' | ')'))
         .filter_map(|w| w.find("https://").map(|i| w[i..].replace("&amp;", "&")))
@@ -104,14 +100,15 @@ async fn mail_to(rt: &PgPool, tenant: Uuid, template: &str, to: &str) -> Mail {
     all.pop().unwrap()
 }
 
-/// An order whose checkout was bound to `origin` (`None`: placed before origins were stored).
 async fn order_on(rt: &PgPool, s: &Shop, origin: Option<&ShopOrigin>, status: &str) -> Uuid {
     let id = raw_order(rt, s, s.cz, "CZK", 12_900, 1, status).await;
     let mut tx = tenant_tx(rt, s.tenant).await.unwrap();
     sqlx::query("UPDATE orders SET shipping_method_snapshot = $2 WHERE id = $1")
         .bind(id)
-        .bind(json!({"id": Uuid::nil(), "carrier": "personal_pickup", "name": "Osobní odběr",
-                     "price_minor": 0}))
+        .bind(
+            json!({"id": Uuid::nil(), "carrier": "personal_pickup", "name": "Osobní odběr",
+                     "price_minor": 0}),
+        )
         .execute(&mut *tx)
         .await
         .unwrap();
@@ -158,7 +155,6 @@ async fn order_mail(rt: &PgPool, s: &Shop, order: Uuid, key: &str) -> Mail {
     }
 }
 
-/// A same-origin alias of the CZ market beside its isolated primary origin.
 async fn shop_with_alias(rt: &PgPool, slug: &str) -> (Shop, ShopOrigin) {
     let s = shop(rt, slug).await;
     let a = alias(rt, &s, &format!("{slug}-alias.localhost")).await;
@@ -181,7 +177,10 @@ async fn order_mails_follow_the_origin_the_order_was_placed_on(db: PgPool) {
     assert!(queued.has("https://checkout.lnkorder.localhost/withdraw"));
     order_mail(&rt, &s, unbound, "lnk:unbound:1")
         .await
-        .assert_on(&isolated(&s.origin), "an order without an origin, isolated market");
+        .assert_on(
+            &isolated(&s.origin),
+            "an order without an origin, isolated market",
+        );
     let m = order_mail(&rt, &s, on_alias, "lnk:alias:1").await;
     m.assert_on(a.as_str(), "an order placed on the same-origin alias");
     assert!(m.has("https://lnkorder-alias.localhost/o/"));
@@ -204,10 +203,16 @@ async fn order_mails_follow_the_origin_the_order_was_placed_on(db: PgPool) {
     );
     order_mail(&rt, &s, on_primary, "lnk:primary:2")
         .await
-        .assert_on(s.origin.as_str(), "the same order after its origin switched");
+        .assert_on(
+            s.origin.as_str(),
+            "the same order after its origin switched",
+        );
     order_mail(&rt, &s, unbound, "lnk:unbound:2")
         .await
-        .assert_on(s.origin.as_str(), "an order without an origin, same-origin market");
+        .assert_on(
+            s.origin.as_str(),
+            "an order without an origin, same-origin market",
+        );
 }
 
 async fn request_mails(rt: &PgPool, s: &Shop, here: &At, order_number: i64, email: &str) {
@@ -462,8 +467,7 @@ async fn watch_alerts_keep_the_origin_the_watch_was_made_on(db: PgPool) {
             .await
             .unwrap();
     }
-    let event =
-        json!({"variant_id": s.variants[0], "before": {"available": 0}, "after": {"available": 10}});
+    let event = json!({"variant_id": s.variants[0], "before": {"available": 0}, "after": {"available": 10}});
     flows::watch_event(
         &mut tx,
         &PublicUrls::default(),
@@ -476,7 +480,10 @@ async fn watch_alerts_keep_the_origin_the_watch_was_made_on(db: PgPool) {
     tx.commit().await.unwrap();
 
     let iso = mail_to(&rt, s.tenant, "watch_alert", "iso@example.com").await;
-    iso.assert_on(&isolated(&s.origin), "alert of a watch made on the isolated origin");
+    iso.assert_on(
+        &isolated(&s.origin),
+        "alert of a watch made on the isolated origin",
+    );
     assert!(iso.has("https://checkout.lnkwatch.localhost/watch/unsubscribe?token="));
     let so = mail_to(&rt, s.tenant, "watch_alert", "alias@example.com").await;
     so.assert_on(a.as_str(), "alert of a watch made on the alias");
@@ -532,9 +539,13 @@ async fn campaign_links_and_one_click_follow_the_market_origin_mode(db: PgPool) 
     let confirm = last_mail(&rt, s.tenant, "newsletter_confirm").await;
     let at_token = confirm.text.find("token=").unwrap() + 6;
     let mut tx = tenant_tx(&rt, s.tenant).await.unwrap();
-    subscribers::confirm(&mut tx, &confirm.text[at_token..at_token + 64], Some(&[1; 32]))
-        .await
-        .unwrap();
+    subscribers::confirm(
+        &mut tx,
+        &confirm.text[at_token..at_token + 64],
+        Some(&[1; 32]),
+    )
+    .await
+    .unwrap();
     tx.commit().await.unwrap();
 
     let iso = campaign(&rt, &s).await;

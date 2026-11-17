@@ -77,7 +77,9 @@ pub async fn origin(
     )
     .fetch_one(&mut **tx)
     .await?;
-    Ok(origin.as_deref().and_then(crate::checkout_access::ShopOrigin::parse))
+    Ok(origin
+        .as_deref()
+        .and_then(crate::checkout_access::ShopOrigin::parse))
 }
 
 /// Mints a read-only capability for `/o/<token>` (A4).
