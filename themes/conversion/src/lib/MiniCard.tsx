@@ -1,5 +1,6 @@
 import { imageUrl, type Messages, t } from "@platform/storefront-sdk/format";
 import type { ProductCard } from "@platform/storefront-sdk/types";
+import { For, Show } from "solid-js";
 
 /**
  * Compact product card for islands (cart cross-sell, "for you", recently viewed): photo, name,
@@ -14,6 +15,7 @@ export default function MiniCard(props: {
   class?: string;
   /** Responsive slot (`lib/images.ts`); without it one ~360px variant (fixed-width rails). */
   sizes?: string;
+  swatches?: boolean;
 }) {
   const p = () => props.product;
   const src = () => {
@@ -43,6 +45,35 @@ export default function MiniCard(props: {
           ? t(props.labels, "product.price_from", { price: p().price.formatted })
           : p().price.formatted}
       </span>
+      <Show when={props.swatches && (p().swatches ?? []).length > 0}>
+        <span class="mt-1.5 flex items-center">
+          <span class="sr-only">
+            {t(props.labels, "product.colors", {
+              names: p()
+                .swatches.map((s) => s.name)
+                .join(", "),
+            })}
+          </span>
+          <span class="flex items-center gap-1.5">
+            <For each={p().swatches.slice(0, 4)}>
+              {(s) => (
+                <svg
+                  aria-hidden="true"
+                  class="size-4 rounded-full border border-black/10 ring-1 ring-white"
+                  viewBox="0 0 16 16"
+                >
+                  <circle cx="8" cy="8" r="8" fill={s.color} />
+                </svg>
+              )}
+            </For>
+            <Show when={p().swatches.length > 4}>
+              <span class="text-[0.8125rem] text-muted-foreground" aria-hidden="true">
+                +{p().swatches.length - 4}
+              </span>
+            </Show>
+          </span>
+        </span>
+      </Show>
     </a>
   );
 }

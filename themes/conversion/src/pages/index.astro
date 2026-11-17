@@ -155,7 +155,7 @@ const viewAll = (to: string) => ({ href: to, label: t("home.view_all") });
     )
   }
 
-  <ForYou client:idle sizes={FOR_YOU_SIZES} title={t("home.for_you")} subtitle={t("home.for_you_hint")} base={shop.base_path} locale={shop.locale} labels={pick(["product.price_from"])} />
+  <ForYou client:idle sizes={FOR_YOU_SIZES} title={t("home.for_you")} subtitle={t("home.for_you_hint")} base={shop.base_path} locale={shop.locale} labels={pick(["product.price_from", "product.colors"])} />
 
   {
     lead && spotProducts.length > 0 && (
