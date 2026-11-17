@@ -12,6 +12,8 @@ export interface Site {
   locales: string[];
   /** Canonical shop host of this market (the checkout origin is `checkout.<shop_host>`). */
   shop_host: string;
+  /** The market's account origin host (A1); legacy `/account*` links redirect there. */
+  account_host?: string | undefined;
   /** Public storefront token the edge injects; never exposed to theme code. */
   storefront_token: string;
   /** Active theme artifact (content address); `null` until a theme is published for the tenant. */
@@ -147,6 +149,7 @@ interface Resolved {
   hostname: string;
   kind?: "shop" | "account";
   shop_hostname?: string;
+  account_hostname?: string;
   tenant_id: string;
   market_id: string;
   default_locale: string;
@@ -193,6 +196,7 @@ function toSite(r: Resolved): Site {
     locale: r.default_locale,
     locales: r.locales,
     shop_host: r.shop_hostname ?? r.hostname,
+    account_host: r.account_hostname,
     storefront_token: r.storefront_token,
     theme_artifact: r.theme_artifact,
     retained_artifacts: r.retained_artifacts,

@@ -5,6 +5,7 @@ import {
   type ArtifactManifest,
   isPlatformPath,
   PLATFORM_SEGMENTS,
+  platformSegment,
   readManifest,
   tokensToCss,
 } from "@platform/theme-kit";
@@ -771,14 +772,11 @@ export function createGateway(opts: GatewayOptions) {
     host: string,
     port: string,
     clientIp: string | undefined,
-    accountOrigin = false,
   ): Promise<Response> {
     const op = ACCOUNT_OPS.find((o) => o.method === req.method && o.path.test(rest));
     if (!op) return problem(404, "not_found", "unknown account operation");
-    const allowed = accountOrigin
-      ? sameOriginFetch(req, host, port)
-      : req.method === "GET" || sameOrigin(req, host, port);
-    if (!allowed) return problem(403, "cross_origin", "cross-origin request");
+    if (!sameOriginFetch(req, host, port))
+      return problem(403, "cross_origin", "cross-origin request");
     let body: ArrayBuffer | undefined;
     if (req.method === "POST" || req.method === "PUT") {
       const b = await readJsonBody(req, MAX_JSON_BODY);
@@ -786,16 +784,12 @@ export function createGateway(opts: GatewayOptions) {
       body = b;
     }
     const session = capabilityCookie(req, SESSION_COOKIE);
-    const cart = accountOrigin ? undefined : capabilityCookie(req, CHECKOUT_CART_COOKIE);
-    const subject = accountOrigin ? undefined : readCookie(req.headers, CONSENT_ID_COOKIE);
     const res = await upstream(
       new Request(`${opts.apiOrigin}/storefront/v1/customer${rest}`, {
         method: req.method,
         headers: apiHeaders(site, {
           ...(body ? { "content-type": "application/json" } : {}),
           ...(session ? { "x-customer-session": session } : {}),
-          ...(cart ? { "x-cart-token": cart } : {}),
-          ...(subject && CONSENT_ID_RE.test(subject) ? { "x-consent-subject": subject } : {}),
           ...(clientIp ? { "x-client-ip": clientIp } : {}),
         }),
         body,
@@ -825,7 +819,7 @@ export function createGateway(opts: GatewayOptions) {
     host: string,
     port: string,
     clientIp: string | undefined,
-    credentials: { cart?: string | undefined; session?: string | undefined },
+    cart: string | undefined,
   ): Promise<Response> {
     if (!ops.some((o) => o.method === req.method && o.path.test(rest)))
       return problem(404, "not_found", "unknown checkout operation");
@@ -840,7 +834,6 @@ export function createGateway(opts: GatewayOptions) {
       if (b instanceof Response) return b;
       body = b;
     }
-    const { cart, session } = credentials;
     // A20: place-order links a consented visitor's purchase to their analytics session and
     // (WP20) to the ad platforms; the API resolves both consents from its records.
     const res = await upstream(
@@ -849,7 +842,6 @@ export function createGateway(opts: GatewayOptions) {
         headers: apiHeaders(site, {
           ...(body ? { "content-type": "application/json" } : {}),
           ...(cart ? { "x-cart-token": cart } : {}),
-          ...(session ? { "x-customer-session": session } : {}),
           ...consentSubject(req),
           ...(clientIp ? { "x-client-ip": clientIp } : {}),
           ...(key ? { "idempotency-key": key } : {}),
@@ -885,14 +877,8 @@ export function createGateway(opts: GatewayOptions) {
   ): Promise<Response> {
     if (!UUID_RE.test(attempt)) return text(404, "Not found");
     const api = `${opts.apiOrigin}/storefront/v1/checkout/fake-pay/${attempt}`;
-    // Paying needs the placing browser's cart or the customer's session (A4: the order token
-    // is read-only), exactly like the order page's payment routes.
     const cart = capabilityCookie(req, CHECKOUT_CART_COOKIE);
-    const session = capabilityCookie(req, SESSION_COOKIE);
-    const payer = {
-      ...(cart ? { "x-cart-token": cart } : {}),
-      ...(session ? { "x-customer-session": session } : {}),
-    };
+    const payer: Record<string, string> = cart ? { "x-cart-token": cart } : {};
     const ret = url.searchParams.get("return") ?? "";
     const back = ORDER_PAGE_RE.test(ret) ? ret : "/";
     if (req.method === "POST") {
@@ -961,7 +947,7 @@ ${
   /**
    * `/_p/consent` on both origins (A20): the choice is recorded by the API, which mints the
    * anonymous subject on the first one. The cookies are scoped to the shop host so the
-   * checkout subdomain (preferences page, sign-in linking) shares them.
+   * checkout subdomain's preferences page shares them.
    */
   async function consentProxy(
     site: Site,
@@ -969,7 +955,6 @@ ${
     host: string,
     port: string,
     clientIp: string | undefined,
-    session: string | undefined,
   ): Promise<Response> {
     if (req.method !== "GET" && req.method !== "POST")
       return text(405, "Method not allowed", { allow: "GET, POST" });
@@ -987,7 +972,6 @@ ${
         headers: apiHeaders(site, {
           ...(body ? { "content-type": "application/json" } : {}),
           ...(subject && CONSENT_ID_RE.test(subject) ? { "x-consent-subject": subject } : {}),
-          ...(session ? { "x-customer-session": session } : {}),
           ...(clientIp ? { "x-client-ip": clientIp } : {}),
         }),
         body,
@@ -1326,7 +1310,7 @@ ${
       host,
       port,
       clientIp,
-      { cart },
+      cart,
     );
   }
 
@@ -1841,6 +1825,23 @@ ${
 
   // --- origins -------------------------------------------------------------------------------
 
+  /**
+   * Old account links on the shop and checkout origins (SHOP-95): `308` to the same page on the
+   * market's account origin. Only paths the strict account page pattern accepts move; the
+   * target origin comes from the resolver, never from the request.
+   */
+  function legacyAccountRedirect(site: Site, url: URL): Response | null {
+    const page = ACCOUNT_PAGE_RE.exec(url.pathname)?.[0];
+    if (!page) return null;
+    if (!site.account_host || !site.shopOrigin) return text(404, "Not found");
+    const target = new URL(site.shopOrigin);
+    target.hostname = site.account_host;
+    return new Response(null, {
+      status: 308,
+      headers: { location: `${target.origin}${page}${url.search}`, "cache-control": "no-store" },
+    });
+  }
+
   async function shop(
     site: Site,
     req: Request,
@@ -1850,6 +1851,8 @@ ${
     clientIp: string | undefined,
   ): Promise<Response> {
     const p = url.pathname;
+    const legacy = legacyAccountRedirect(site, url);
+    if (legacy) return legacy;
     const sameOrigin = sameOriginShop(site);
     if (sameOrigin) {
       if (isPlatformPagePath(p)) return platformPage(site, req, url);
@@ -1865,7 +1868,7 @@ ${
           clientIp,
         );
     }
-    if (p === "/_p/consent") return consentProxy(site, req, host, port, clientIp, undefined);
+    if (p === "/_p/consent") return consentProxy(site, req, host, port, clientIp);
     // `/<locale>/…` of a non-default market locale (spec §9.1): theme pages and island reads
     // render in that locale from the unprefixed path. The locale is part of the cache key; the
     // cart keeps its unprefixed routes (cookie `Path=/_p`).
@@ -1970,12 +1973,9 @@ ${
     clientIp: string | undefined,
   ): Promise<Response> {
     const p = url.pathname;
-    const credentials = {
-      cart: capabilityCookie(req, CHECKOUT_CART_COOKIE),
-      session: capabilityCookie(req, SESSION_COOKIE),
-    };
-    if (p.startsWith("/_p/account/"))
-      return accountProxy(site, req, p.slice("/_p/account".length), host, port, clientIp);
+    const legacy = legacyAccountRedirect(site, url);
+    if (legacy) return legacy;
+    const cart = capabilityCookie(req, CHECKOUT_CART_COOKIE);
     if (p === "/_p/withdraw" || p.startsWith("/_p/withdraw/")) {
       const rest = p.slice("/_p/withdraw".length);
       return checkoutProxy(
@@ -1987,7 +1987,7 @@ ${
         host,
         port,
         clientIp,
-        credentials,
+        cart,
       );
     }
     if (p === "/_p/checkout" || p.startsWith("/_p/checkout/")) {
@@ -2001,7 +2001,7 @@ ${
         host,
         port,
         clientIp,
-        credentials,
+        cart,
       );
     }
     if (p.startsWith("/_p/orders/")) {
@@ -2015,13 +2015,12 @@ ${
         host,
         port,
         clientIp,
-        credentials,
+        cart,
       );
     }
     if (p.startsWith("/_p/fake-pay/"))
       return fakePay(site, req, url, p.slice("/_p/fake-pay/".length), host, port);
-    if (p === "/_p/consent")
-      return consentProxy(site, req, host, port, clientIp, capabilityCookie(req, SESSION_COOKIE));
+    if (p === "/_p/consent") return consentProxy(site, req, host, port, clientIp);
     if (p === "/_p/reviews") return reviewSubmit(site, req, host, port);
     if (
       p === "/_p/flows/restore-cart" ||
@@ -2089,7 +2088,8 @@ ${
     if (p === "/_p/tokens.css") return tokensCss(site);
     if (p.startsWith("/_p/") || p.startsWith("/_edge/"))
       return problem(404, "not_found", "unknown platform route");
-    if (isSameOriginCheckoutPath(p)) return text(404, "Not found");
+    if (isSameOriginCheckoutPath(p) || platformSegment(p) === "account")
+      return text(404, "Not found");
     if (req.method !== "GET" && req.method !== "HEAD")
       return text(405, "Method not allowed", { allow: "GET, HEAD" });
     const checkoutArtifact = site.checkout_artifact ?? opts.checkoutArtifact;
@@ -2100,13 +2100,10 @@ ${
 
     const m = await manifest(checkoutArtifact);
     if (req.method === "GET") opts.counters?.page(site, "checkout");
-    // The checkout binding (cart capability, session) is only ever handed to the platform
-    // checkout; the worker itself never sees the cookies, only the edge's context id.
     if (m.kind !== "checkout") throw new Error(`artifact ${checkoutArtifact} is not a checkout`);
     const consentSubject = readCookie(req.headers, CONSENT_ID_COOKIE);
     const r = await render(checkoutArtifact, normalizeUrl(url), site, {
-      cartToken: capabilityCookie(req, CHECKOUT_CART_COOKIE),
-      sessionToken: capabilityCookie(req, SESSION_COOKIE),
+      cartToken: cart,
       consentSubject:
         consentSubject && CONSENT_ID_RE.test(consentSubject) ? consentSubject : undefined,
     });
@@ -2120,8 +2117,6 @@ ${
     });
     for (const [k, v] of Object.entries(securityHeaders("checkout", csp))) headers.set(k, v);
     headers.set("cache-control", "no-store");
-    // A sign-in link (`/account/verify?token=`) or an order page (`/o/<token>`, A4) must not
-    // leak its capability through Referer.
     // Newsletter pages (WP18) post their forms to this origin: `same-origin` keeps the token
     // from other sites while the browser still sends a real Origin (not `null`) with the form.
     // So does the review form (WP16).
@@ -2153,7 +2148,7 @@ ${
   ): Promise<Response> {
     const p = url.pathname;
     if (p.startsWith("/_p/account/"))
-      return accountProxy(site, req, p.slice("/_p/account".length), host, port, clientIp, true);
+      return accountProxy(site, req, p.slice("/_p/account".length), host, port, clientIp);
     if (p === "/_p/tokens.css") return tokensCss(site);
     if (p.startsWith("/_checkout/")) return checkoutAsset(site, req, p);
     if (p === "/")
