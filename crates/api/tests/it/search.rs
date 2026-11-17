@@ -370,6 +370,12 @@ async fn new_sorts_on_an_index_with_previous_settings(db: PgPool) {
         .await
         .unwrap();
     admin.wait(previous, Duration::from_secs(30)).await.unwrap();
+    let mut tx = platform::db::tenant_tx(&s.runtime, s.tenant).await.unwrap();
+    sqlx::query("UPDATE search_indexes SET settings_version = 3")
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    tx.commit().await.unwrap();
 
     let ids = |items: &Value| -> Vec<Value> {
         items
