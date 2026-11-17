@@ -3145,6 +3145,239 @@
         ]
       }
     },
+    "/admin/v1/checkout-origins": {
+      "get": {
+        "tags": [
+          "storefront-admin"
+        ],
+        "summary": "The checkout policy of each exact origin of the shop (owner/admin).",
+        "operationId": "list_checkout_origins",
+        "parameters": [
+          {
+            "name": "X-Tenant-Id",
+            "in": "header",
+            "description": "The tenant to act in; the caller must be a member.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CheckoutOriginList"
+                }
+              }
+            }
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "staff_jwt": []
+          }
+        ]
+      }
+    },
+    "/admin/v1/checkout-origins/history": {
+      "post": {
+        "tags": [
+          "storefront-admin"
+        ],
+        "summary": "Records the origin's full history (owner, login at most 15 minutes old): the platform claim\nof a platform hostname, or the merchant's attestation for a custom domain. Changes no mode.",
+        "operationId": "record_origin_history",
+        "parameters": [
+          {
+            "name": "X-Tenant-Id",
+            "in": "header",
+            "description": "The tenant to act in; the caller must be a member.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OriginHistoryInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CheckoutOrigin"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "origin_history_unknown, platform_hostname",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "attestation_required, unsupported_attestation_version",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "staff_jwt": []
+          }
+        ]
+      }
+    },
+    "/admin/v1/checkout-origins/mode": {
+      "post": {
+        "tags": [
+          "storefront-admin"
+        ],
+        "summary": "Switches one exact origin between isolated and same-origin checkout (owner, login at most\n15 minutes old), audited. Revokes every open checkout, link grant, identify and placement\nstate of the shop, aliases included, and purges the edge's caches of the shop. Same-origin\nneeds a known history and the platform's readiness; switching back to isolated needs\nneither. The current mode is a no-op.",
+        "operationId": "switch_checkout_mode",
+        "parameters": [
+          {
+            "name": "X-Tenant-Id",
+            "in": "header",
+            "description": "The tenant to act in; the caller must be a member.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CheckoutModeInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CheckoutOrigin"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "origin_history_unknown, checkout_not_ready",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "staff_jwt": []
+          }
+        ]
+      }
+    },
     "/admin/v1/cod-reports": {
       "post": {
         "tags": [
@@ -26359,6 +26592,29 @@
           }
         }
       },
+      "Attestation": {
+        "type": "object",
+        "required": [
+          "by",
+          "at",
+          "version"
+        ],
+        "properties": {
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "by": {
+            "type": "string",
+            "description": "The staff user who attested."
+          },
+          "version": {
+            "type": "integer",
+            "format": "int32",
+            "description": "[`ATTESTATION_VERSION`] when they attested."
+          }
+        }
+      },
       "AuditEntry": {
         "type": "object",
         "required": [
@@ -28229,6 +28485,73 @@
           "isolated",
           "same_origin"
         ]
+      },
+      "CheckoutModeInput": {
+        "type": "object",
+        "required": [
+          "origin",
+          "mode"
+        ],
+        "properties": {
+          "mode": {
+            "$ref": "#/components/schemas/CheckoutMode"
+          },
+          "origin": {
+            "type": "string",
+            "description": "The exact origin as browsers serialize it (`https://shop.example`)."
+          }
+        },
+        "additionalProperties": false
+      },
+      "CheckoutOrigin": {
+        "type": "object",
+        "description": "The checkout policy of one exact origin of the tenant, as the admin sees it.",
+        "required": [
+          "origin",
+          "mode",
+          "mode_generation",
+          "history"
+        ],
+        "properties": {
+          "attestation": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Attestation",
+                "description": "Set for [`OriginHistory::MerchantAttestedNeverServed`] only."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "history": {
+            "$ref": "#/components/schemas/OriginHistory"
+          },
+          "mode": {
+            "$ref": "#/components/schemas/CheckoutMode"
+          },
+          "mode_generation": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "origin": {
+            "type": "string"
+          }
+        }
+      },
+      "CheckoutOriginList": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CheckoutOrigin"
+            }
+          }
+        }
       },
       "CheckoutOriginPolicy": {
         "type": "object",
@@ -35593,6 +35916,36 @@
             "$ref": "#/components/schemas/MoneyView"
           }
         }
+      },
+      "OriginHistory": {
+        "type": "string",
+        "description": "What is known about everything an exact origin ever served (same-origin-checkout.md, C3).",
+        "enum": [
+          "unknown_or_used",
+          "platform_never_reassigned",
+          "merchant_attested_never_served"
+        ]
+      },
+      "OriginHistoryInput": {
+        "type": "object",
+        "required": [
+          "origin"
+        ],
+        "properties": {
+          "attestation_version": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "The full-history attestation version the merchant accepted: required for a custom\ndomain, refused for a platform hostname."
+          },
+          "origin": {
+            "type": "string",
+            "description": "The exact origin as browsers serialize it (`https://shop.example`)."
+          }
+        },
+        "additionalProperties": false
       },
       "Outcome": {
         "type": "string",

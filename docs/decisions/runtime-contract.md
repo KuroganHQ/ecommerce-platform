@@ -393,7 +393,8 @@ separate cache namespace, never cached (already bypassed by the policy).
   `Context::path()` and canonicals with `Context::page_url()`; hreflang alternates cover every
   (market, locale). `ShopModel.base_path` is what themes put in front of the links they build
   themselves; `ShopModel.checkout_url` is the checkout origin (`/withdraw`) and
-  `ShopModel.account_url` the account origin (§13).
+  `ShopModel.account_url` the account origin (§13). `checkout_url` follows the origin's checkout
+  mode, which an admin switch changes (runbook §6e); the switch purges the shop's cached pages.
 - **New `/_p/*` routes:** `POST /_p/consent` (WP8 shipped a stub; WP9 replaced it with the real
   route, see §13 and `consent-contract.md`). `POST /_p/newsletter` also accepts a plain
   urlencoded form and answers 303 back to the same-origin `Referer` (else `/`) with
