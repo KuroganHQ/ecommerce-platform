@@ -167,8 +167,8 @@ test("owner records the platform history; an attestation on a platform hostname 
   );
   await expectAccessible(page, "checkout-origins-history-refused");
 
-  // Kobalte checkboxes: the visually hidden input is toggled through its label.
-  await dialog().locator("label").filter({ hasText: ATTESTATION }).click();
+  await tabTo(page, box);
+  await page.keyboard.press("Space");
   await expect(box).not.toBeChecked();
   await dialog().getByRole("button", { name: "Record history" }).click();
   await expect(dialog()).toBeHidden();
