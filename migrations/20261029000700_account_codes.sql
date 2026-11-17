@@ -22,6 +22,8 @@ CREATE POLICY tenant_isolation ON account_codes TO app_runtime
     USING (tenant_id = current_setting('app.tenant_id')::uuid)
     WITH CHECK (tenant_id = current_setting('app.tenant_id')::uuid);
 GRANT SELECT, INSERT, UPDATE ON account_codes TO app_runtime;
+CREATE POLICY retention_read ON account_codes FOR SELECT TO app_owner USING (true);
+CREATE POLICY retention_purge ON account_codes FOR DELETE TO app_owner USING (expires_at < now());
 
 CREATE OR REPLACE FUNCTION platform.purge_customer_auth() RETURNS bigint
 LANGUAGE sql VOLATILE SECURITY DEFINER

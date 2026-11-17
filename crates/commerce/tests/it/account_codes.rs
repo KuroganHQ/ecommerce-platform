@@ -352,3 +352,37 @@ async fn concurrent_consumes_have_one_winner(db: PgPool) {
     }
     assert_eq!(wins, 1);
 }
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn maintenance_purges_expired_codes(db: PgPool) {
+    let runtime = testkit::runtime_pool(&db, 2).await;
+    let shop = same_origin(&runtime, "purge").await;
+    let live = issue(&runtime, &shop, Purpose::Placement, None).await;
+    let stale = issue(&runtime, &shop, Purpose::Placement, None).await;
+    let mut tx = tenant_tx(&runtime, shop.tenant).await.unwrap();
+    sqlx::query(
+        "UPDATE account_codes SET expires_at = now() - interval '1 second' WHERE code_hash = $1",
+    )
+    .bind(capability::hash(&stale))
+    .execute(&mut *tx)
+    .await
+    .unwrap();
+    tx.commit().await.unwrap();
+
+    let purged: i64 = sqlx::query_scalar("SELECT platform.purge_customer_auth()")
+        .fetch_one(&runtime)
+        .await
+        .unwrap();
+    assert_eq!(purged, 1);
+    assert_eq!(
+        consume(&runtime, &shop, Purpose::Placement, &live).await,
+        Some(AccountEvidence { customer_id: None }),
+        "a live code survives the purge"
+    );
+    let mut tx = tenant_tx(&runtime, shop.tenant).await.unwrap();
+    let left: i64 = sqlx::query_scalar("SELECT count(*) FROM account_codes")
+        .fetch_one(&mut *tx)
+        .await
+        .unwrap();
+    assert_eq!(left, 1);
+}
