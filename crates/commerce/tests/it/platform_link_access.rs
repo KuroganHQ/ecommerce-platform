@@ -52,7 +52,7 @@ async fn same_origin(runtime: &PgPool, slug: &str) -> (Shop, At) {
 
 async fn order(runtime: &PgPool, shop: &Shop) -> (Uuid, String) {
     let id =
-        testkit::storefront::raw_order(runtime, shop, shop.cz, "CZK", 100_00, 1, "pending").await;
+        testkit::storefront::raw_order(runtime, shop, shop.cz, "CZK", 10_000, 1, "pending").await;
     let mut tx = tenant_tx(runtime, shop.tenant).await.unwrap();
     let token = orders::issue_token(&mut tx, id).await.unwrap();
     tx.commit().await.unwrap();

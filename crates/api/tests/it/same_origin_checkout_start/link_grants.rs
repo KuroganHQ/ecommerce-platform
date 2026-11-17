@@ -70,7 +70,7 @@ impl Ctx {
             &self.shop,
             self.shop.cz,
             "CZK",
-            100_00,
+            10_000,
             1,
             status,
         )
