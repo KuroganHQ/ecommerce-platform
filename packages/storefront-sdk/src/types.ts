@@ -81,9 +81,11 @@ export type AddressInput = S["AddressInput"];
 export type SignInResult = S["SignInResult"];
 
 /**
- * Consent (A20). Themes post `ConsentChoice` to `/_p/consent` (see
- * `docs/decisions/consent-contract.md`); `null` purposes were never asked.
+ * Consent (A20). Themes post `CookieChoice` (cookie purposes only, C9) to `/_p/consent` (see
+ * `docs/decisions/consent-contract.md`); the account origin takes `ConsentChoice` (email purposes
+ * only). `null` purposes were never asked.
  */
+export type CookieChoice = S["CookieChoice"];
 export type ConsentChoice = S["ConsentChoice"];
 export type ConsentState = S["ConsentState"];
 export type ConsentPurposes = S["Purposes"];

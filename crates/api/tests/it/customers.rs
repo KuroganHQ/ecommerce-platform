@@ -762,9 +762,7 @@ async fn consent_is_recorded_and_resolved_for_the_anonymous_subject(db: PgPool) 
     let (_, empty, _) = c.call(Call::get("/storefront/v1/consent")).await;
     assert_eq!(empty["text_version"], Value::Null);
 
-    // Clients cannot forge the source or send unknown purposes.
     for bad in [
-        json!({"purposes": {"analytics": true}, "text_version": "v", "source": "linked"}),
         json!({"purposes": {"tracking": true}, "text_version": "v"}),
         json!({"purposes": {}, "text_version": "v"}),
         json!({"purposes": {"ads": true}, "text_version": "v 1"}),
@@ -773,19 +771,6 @@ async fn consent_is_recorded_and_resolved_for_the_anonymous_subject(db: PgPool) 
         assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
     }
 
-    let (session, _) = c.sign_in("k@example.test", &[]).await;
-    let (status, _, _) = c
-        .call(
-            Call::post("/storefront/v1/consent", json!({"purposes": {"email_marketing": true}, "text_version": "2026-09-25", "source": "preferences"}))
-                .header("x-consent-subject", subject.clone())
-                .header("x-customer-session", session.clone()),
-        )
-        .await;
-    assert_eq!(status, StatusCode::OK);
-    let (_, signed_in, _) = c
-        .call(Call::get("/storefront/v1/consent").header("x-customer-session", session))
-        .await;
-    assert_eq!(signed_in["text_version"], Value::Null);
     let mut tx = platform::db::tenant_tx(&c.runtime, c.shop.tenant)
         .await
         .unwrap();
@@ -800,19 +785,120 @@ async fn consent_is_recorded_and_resolved_for_the_anonymous_subject(db: PgPool) 
             .unwrap(),
     );
     assert!(ip_hashes > 0);
-    assert_eq!(sources, ["banner", "preferences"]);
-    let customer_records: i64 =
-        sqlx::query_scalar("SELECT count(*) FROM consent_records WHERE subject_type = 'customer'")
-            .fetch_one(&mut *tx)
-            .await
-            .unwrap();
-    assert_eq!(customer_records, 0);
+    assert_eq!(sources, ["browser"], "the server owns the source");
     // Append-only for the application.
     assert!(
         sqlx::query("UPDATE consent_records SET granted = true")
             .execute(&mut *tx)
             .await
             .is_err()
+    );
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn theme_consent_never_changes_customer_preferences(db: PgPool) {
+    let c = setup(db).await;
+    let (session, _) = c.sign_in("pat@example.test", &[]).await;
+    let (status, body, _) = c
+        .call(
+            Call::post(
+                "/storefront/v1/customer/consent",
+                json!({"purposes": {"email_marketing": true, "review_invites": false}, "text_version": "2026-09-25"}),
+            )
+            .header("x-customer-session", session.clone()),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let customer_records = async || -> Vec<(String, String, bool, String)> {
+        let mut tx = platform::db::tenant_tx(&c.runtime, c.shop.tenant)
+            .await
+            .unwrap();
+        sqlx::query_as(
+            "SELECT subject_type, purpose, granted, source FROM consent_records
+             WHERE subject_type <> 'anon' ORDER BY subject_type, purpose",
+        )
+        .fetch_all(&mut *tx)
+        .await
+        .unwrap()
+    };
+    let before = customer_records().await;
+    assert_eq!(before.len(), 2);
+
+    let (_, _, res) = c
+        .call(Call::post(
+            "/storefront/v1/consent",
+            json!({"purposes": {"analytics": true}, "text_version": "2026-09-25"}),
+        ))
+        .await;
+    let subject = res.headers()["x-consent-subject"]
+        .to_str()
+        .unwrap()
+        .to_owned();
+    let theme = |body: Value| {
+        Call::post("/storefront/v1/consent", body)
+            .header("x-consent-subject", subject.clone())
+            .header("x-customer-session", session.clone())
+    };
+
+    for purposes in [
+        json!({"email_marketing": false}),
+        json!({"review_invites": true}),
+        json!({"analytics": true, "email_marketing": true}),
+    ] {
+        for source in ["banner", "preferences", "linked", "checkout", "account"] {
+            let (status, body, _) = c
+                .call(theme(json!({"purposes": purposes, "text_version": "2026-09-25", "source": source})))
+                .await;
+            assert_eq!(
+                status,
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "{purposes} {source}: {body}"
+            );
+        }
+    }
+    for source in ["preferences", "linked", "checkout", "account", "double_opt_in"] {
+        let (status, state, res) = c
+            .call(theme(json!({"purposes": {"ads": true}, "text_version": "2026-09-25", "source": source})))
+            .await;
+        assert_eq!(status, StatusCode::OK, "{source}: {state}");
+        assert_eq!(res.headers()["x-consent-summary"], "analytics,ads");
+        assert_eq!(state["purposes"]["email_marketing"], Value::Null);
+    }
+
+    same_origin_checkout(&c, c.shop.tenant, &c.shop.origin).await;
+    let (status, body, _) = c
+        .call(
+            account_code("identify", STATE, c.shop.origin.as_str())
+                .header("x-customer-session", session.clone())
+                .header("x-consent-subject", subject.clone()),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    c.sign_in("pat@example.test", &[("x-consent-subject", subject.clone())])
+        .await;
+
+    assert_eq!(customer_records().await, before);
+    let (_, account, _) = c
+        .call(Call::get("/storefront/v1/customer/consent").header("x-customer-session", session))
+        .await;
+    assert_eq!(account["purposes"]["email_marketing"], true);
+    assert_eq!(account["purposes"]["review_invites"], false);
+    let mut tx = platform::db::tenant_tx(&c.runtime, c.shop.tenant)
+        .await
+        .unwrap();
+    let anon: Vec<(String, String)> = sqlx::query_as(
+        "SELECT DISTINCT purpose, source FROM consent_records WHERE subject_type = 'anon'
+         ORDER BY purpose",
+    )
+    .fetch_all(&mut *tx)
+    .await
+    .unwrap();
+    assert_eq!(
+        anon,
+        [
+            ("ads".to_owned(), "browser".to_owned()),
+            ("analytics".to_owned(), "browser".to_owned())
+        ]
     );
 }
 

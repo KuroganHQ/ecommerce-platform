@@ -1330,12 +1330,19 @@ describe("platform routes backed by the real API (WP6)", () => {
     expect(read.headers.get("set-cookie")).toBeNull();
     const res = await get(
       `${shop}/_p/consent`,
-      { ...json, "x-forwarded-for": "203.0.113.5", "x-consent-subject": "f".repeat(32) },
+      {
+        ...json,
+        "x-forwarded-for": "203.0.113.5",
+        "x-consent-subject": "f".repeat(32),
+        "x-customer-session": "sessiontoken_000000000001",
+        cookie: "__Host-sid=sessiontoken_000000000001; sid=sessiontoken_000000000001",
+      },
       { method: "POST", body: choice },
     );
     expect(res.status).toBe(200);
     const sent = api.calls.at(-1);
     expect(sent?.headers["x-consent-subject"]).toBeUndefined(); // only the cookie counts
+    expect(sent?.headers["x-customer-session"]).toBeUndefined();
     expect(sent?.headers["x-client-ip"]).toBe("203.0.113.5");
     const cookies = res.headers.getSetCookie();
     expect(cookies).toEqual([

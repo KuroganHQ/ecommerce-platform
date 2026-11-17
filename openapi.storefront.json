@@ -1771,7 +1771,7 @@
         "tags": [
           "storefront"
         ],
-        "summary": "The anonymous subject's current choice. `text_version: null` means no choice yet.",
+        "summary": "The anonymous subject's cookie categories. `text_version: null` means no choice yet; the\nemail purposes are always `null`.",
         "operationId": "get_consent",
         "parameters": [
           {
@@ -1858,7 +1858,7 @@
         "tags": [
           "storefront"
         ],
-        "summary": "Records a choice for the anonymous subject (minted on the first choice) and answers its new\nstate.",
+        "summary": "Records the browser's cookie categories for the anonymous subject (minted on the first\nchoice, source `browser`) and answers its new state. A body `source` is ignored; email\npurposes are refused.",
         "operationId": "post_consent",
         "parameters": [
           {
@@ -1933,7 +1933,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ConsentChoice"
+                "$ref": "#/components/schemas/CookieChoice"
               }
             }
           },
@@ -7837,7 +7837,7 @@
       },
       "ConsentChoice": {
         "type": "object",
-        "description": "A choice as posted to `/_p/consent` (the contract in `docs/decisions/consent-contract.md`).",
+        "description": "A choice on the account origin (`/_p/account/consent`) or at checkout placement.",
         "required": [
           "purposes",
           "text_version"
@@ -7848,7 +7848,7 @@
           },
           "source": {
             "$ref": "#/components/schemas/Source",
-            "description": "`banner` (default) or `preferences`."
+            "description": "Ignored on the account origin (recorded as `account`)."
           },
           "text_version": {
             "type": "string",
@@ -7927,6 +7927,48 @@
           "phone": {
             "type": [
               "string",
+              "null"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "CookieChoice": {
+        "type": "object",
+        "description": "A choice as posted to `/_p/consent` (the contract in `docs/decisions/consent-contract.md`).\nOther keys, `source` included, are ignored: the server records where the choice came from.",
+        "required": [
+          "purposes",
+          "text_version"
+        ],
+        "properties": {
+          "purposes": {
+            "$ref": "#/components/schemas/CookiePurposes"
+          },
+          "text_version": {
+            "type": "string",
+            "description": "The consent text version the person saw (`GET /shop` → `consent.text_version`)."
+          }
+        }
+      },
+      "CookiePurposes": {
+        "type": "object",
+        "description": "The browser's cookie categories: all `/_p/consent` may set (C9).",
+        "properties": {
+          "ads": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "analytics": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "personalization": {
+            "type": [
+              "boolean",
               "null"
             ]
           }
