@@ -9,6 +9,7 @@ import {
   buildArtifact,
   fakeApi,
   hostileTheme,
+  LINK_GRANT,
   platformCheckoutWorker,
   REVOKED_CAPABILITY,
   site,
@@ -97,7 +98,7 @@ const get = (
   gateway = gw,
 ) => gateway.fetch(new Request(url, { ...init, headers: { host: new URL(url).host, ...headers } }));
 
-function expectPlatformHeaders(res: Response, label: string) {
+function expectPlatformHeaders(res: Response, label: string, cookies: string[] = []) {
   expect(res.headers.get("cache-control"), label).toBe("no-store");
   expect(res.headers.get("referrer-policy"), label).toBe("strict-origin");
   expect(res.headers.get("x-frame-options"), label).toBe("DENY");
@@ -109,7 +110,7 @@ function expectPlatformHeaders(res: Response, label: string) {
   const csp = res.headers.get("content-security-policy") ?? "";
   expect(csp, label).toContain("frame-ancestors 'none'");
   expect(csp, label).toContain("worker-src 'none'");
-  expect(res.headers.getSetCookie(), label).toEqual([]);
+  expect(res.headers.getSetCookie(), label).toEqual(cookies);
 }
 
 beforeAll(async () => {
@@ -195,12 +196,19 @@ describe("same-origin platform pages answer top-level navigations only (C1)", ()
       expect(api.calls).toEqual([]);
     });
 
-    test("a top-level document navigation renders /checkout, fails a malformed link closed and 404s the rest", async () => {
+    test("a top-level document navigation renders /checkout and /withdraw, fails a malformed link closed and 404s the rest", async () => {
       const res = await get(`${FRESH}${page}`, { ...NAVIGATE, cookie: COOKIE });
-      expectPlatformHeaders(res, page);
+      const minted = `__Host-Http-cap=${LINK_GRANT}; Path=/; HttpOnly; Secure; SameSite=Lax`;
+      expectPlatformHeaders(res, page, page === "/withdraw" ? [minted] : []);
       if (page === "/checkout") {
         expect(res.status).toBe(200);
         expect(api.calls.map((c) => c.url)).toEqual(["http://api.test/storefront/v1/checkout"]);
+      } else if (page === "/withdraw") {
+        expect(res.status).toBe(200);
+        expect(api.calls.map((c) => c.url)).toEqual([
+          "http://api.test/storefront/v1/link-grants",
+          "http://api.test/storefront/v1/checkout",
+        ]);
       } else if (page === "/o/x") {
         expect(res.status).toBe(303);
         expect(res.headers.get("location")).toBe("/o");

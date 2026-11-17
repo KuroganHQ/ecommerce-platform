@@ -278,8 +278,15 @@ export function fakeApi() {
         status: "pending",
       });
     if (p === "/link-grants" && req.method === "POST") {
-      const token = (JSON.parse(calls.at(-1)?.body || "{}") as { link?: { token?: string } }).link
-        ?.token;
+      const link = (
+        JSON.parse(calls.at(-1)?.body || "{}") as { link?: { kind?: string; token?: string } }
+      ).link;
+      if (link?.kind === "withdrawal_request")
+        return Response.json(
+          { resource: { kind: "withdrawal_request" } },
+          { status: 201, headers: { "x-link-grant": LINK_GRANT } },
+        );
+      const token = link?.token;
       if (token === LINK_THROWS) throw new Error(`upstream failed for /o/${token}`);
       const id = token === ORDER_LINK ? ORDER_ID : token === EVIL_LINK ? "//evil.example" : null;
       if (!id) return Response.json({ code: "not_found", detail: `no ${token}` }, { status: 404 });
