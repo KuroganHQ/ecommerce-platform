@@ -183,9 +183,15 @@ export default function BuyBox(props: Props) {
               <For each={opt.values}>
                 {(value) => (
                   <label
-                    class="chip min-w-14 justify-center"
+                    class={
+                      value.swatch
+                        ? "chip relative size-11 rounded-full p-0 has-checked:ring-2 has-checked:ring-foreground has-checked:ring-offset-2"
+                        : "chip min-w-14 justify-center"
+                    }
                     classList={{
-                      "text-subtle line-through decoration-1": !available(opt.code, value.code),
+                      "opacity-40": Boolean(value.swatch) && !available(opt.code, value.code),
+                      "text-subtle line-through decoration-1":
+                        !value.swatch && !available(opt.code, value.code),
                     }}
                   >
                     <input
@@ -196,7 +202,20 @@ export default function BuyBox(props: Props) {
                       checked={selected()[opt.code] === value.code}
                       onChange={() => choose(opt.code, value.code)}
                     />
-                    {value.name}
+                    <Show when={value.swatch} fallback={value.name}>
+                      {(hex) => (
+                        <>
+                          <svg
+                            aria-hidden="true"
+                            class="absolute inset-0 size-full rounded-full"
+                            viewBox="0 0 44 44"
+                          >
+                            <circle cx="22" cy="22" r="22" fill={hex()} />
+                          </svg>
+                          <span class="sr-only">{value.name}</span>
+                        </>
+                      )}
+                    </Show>
                     <Show when={!available(opt.code, value.code)}>
                       <span class="sr-only"> ({l("product.unavailable")})</span>
                     </Show>
