@@ -356,6 +356,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/storefront/v1/checkout/placement/callback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * A2.4, same-origin mode: consumes the placement `state` and the account origin's placement
+         *     code and places the order with the input reviewed when the state was created, in one
+         *     transaction. The order belongs to the linked account only when the code vouches for it;
+         *     otherwise it is a guest order (`as_guest`). A mismatched, unsolicited, reused or expired
+         *     callback, or a capability rotation since the place-order POST, is `404` (or the placement's
+         *     own `409`/`422`) and places nothing.
+         */
+        post: operations["placement_callback"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/storefront/v1/checkout/saved-addresses": {
         parameters: {
             query?: never;
@@ -1610,8 +1634,18 @@ export interface components {
             /** @description The checkout's own confirmation email, frozen at placement. */
             email: string;
             number: string;
+            /**
+             * Format: uuid
+             * @description Selects the clean order page `/o/<order id>`; not a credential.
+             */
+            order_id: string;
             /** @description An online payment (Stripe, the fake gateway) is not completed yet. */
             payment_due: boolean;
+            /**
+             * @description The checkout was linked to an account, but the account origin vouched for no account or
+             *     another one, so the order belongs to no account (A2.4).
+             */
+            placed_as_guest: boolean;
         };
         CheckoutStart: {
             /** @description The browser's current checkout capability (`__Host-Http-cart`), revoked by the start. */
@@ -1656,6 +1690,13 @@ export interface components {
         Confirmation: {
             /** @description The address, partly masked (`j***@example.com`). */
             email: string;
+        };
+        ConfirmedPlacement: {
+            /** @description The account origin vouched for no account or another one: the order is a guest order. */
+            as_guest: boolean;
+            number: string;
+            /** Format: uuid */
+            order_id: string;
         };
         /** @description A choice on the account origin (`/_p/account/consent`) or at checkout placement. */
         ConsentChoice: {
@@ -2251,6 +2292,16 @@ export interface components {
             /** Format: uuid */
             order_id: string;
             payment: components["schemas"]["PaymentStart"];
+        };
+        PlacementCallback: {
+            /** @description The account origin's placement code, from the callback URL. */
+            code?: string;
+            /** @description From the callback URL. */
+            state?: string;
+        };
+        PlacementState: {
+            /** @description For the account origin round trip (`<account origin>/placement?state=…`). */
+            state: string;
         };
         /** @description The preference page's view of a subscription. */
         Preferences: {
@@ -3684,6 +3735,15 @@ export interface operations {
                     "application/json": components["schemas"]["PlacedOrder"];
                 };
             };
+            /** @description A same-origin checkout linked to an account: no order yet; confirm the placement through the account origin (A2.4) */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlacementState"];
+                };
+            };
             /** @description idempotency_key_required */
             400: {
                 headers: {
@@ -3712,6 +3772,76 @@ export interface operations {
                 };
             };
             /** @description legal_consent_required | checkout_incomplete | ship_to_not_allowed */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    placement_callback: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description The tenant's public storefront token. */
+                "X-Storefront-Token": string;
+                /** @description Market id resolved from the shop host by the edge. */
+                "X-Market": string;
+                /** @description Locale hint (one of the market's locales). */
+                "X-Locale"?: string | null;
+                /** @description Cart capability from the `cart` cookie (shop) or `__Host-cart` (checkout origin). */
+                "X-Cart-Token": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlacementCallback"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    /** @description The replacing checkout capability when the placement wrote a note (C6; for the edge only) */
+                    "X-Cart-Token"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConfirmedPlacement"];
+                };
+            };
+            /** @description shop_origin_required | shop_origin_mismatch */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Rejected */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description checkout_mode_changed | cart_changed | price_changed | insufficient_stock | out_of_stock | cart_unavailable | coupon_* */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description checkout_incomplete | ship_to_not_allowed */
             422: {
                 headers: {
                     [name: string]: unknown;

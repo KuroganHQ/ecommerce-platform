@@ -17931,6 +17931,16 @@
               }
             }
           },
+          "202": {
+            "description": "A same-origin checkout linked to an account: no order yet; confirm the placement through the account origin (A2.4)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlacementState"
+                }
+              }
+            }
+          },
           "400": {
             "description": "idempotency_key_required",
             "content": {
@@ -17963,6 +17973,126 @@
           },
           "422": {
             "description": "legal_consent_required | checkout_incomplete | ship_to_not_allowed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/storefront/v1/checkout/placement/callback": {
+      "post": {
+        "tags": [
+          "storefront"
+        ],
+        "summary": "A2.4, same-origin mode: consumes the placement `state` and the account origin's placement\ncode and places the order with the input reviewed when the state was created, in one\ntransaction. The order belongs to the linked account only when the code vouches for it;\notherwise it is a guest order (`as_guest`). A mismatched, unsolicited, reused or expired\ncallback, or a capability rotation since the place-order POST, is `404` (or the placement's\nown `409`/`422`) and places nothing.",
+        "operationId": "placement_callback",
+        "parameters": [
+          {
+            "name": "X-Storefront-Token",
+            "in": "header",
+            "description": "The tenant's public storefront token.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Market",
+            "in": "header",
+            "description": "Market id resolved from the shop host by the edge.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-Locale",
+            "in": "header",
+            "description": "Locale hint (one of the market's locales).",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "X-Cart-Token",
+            "in": "header",
+            "description": "Cart capability from the `cart` cookie (shop) or `__Host-cart` (checkout origin).",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlacementCallback"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "headers": {
+              "X-Cart-Token": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "The replacing checkout capability when the placement wrote a note (C6; for the edge only)"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfirmedPlacement"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "shop_origin_required | shop_origin_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Rejected",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "checkout_mode_changed | cart_changed | price_changed | insufficient_stock | out_of_stock | cart_unavailable | coupon_*",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "checkout_incomplete | ship_to_not_allowed",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -27086,9 +27216,11 @@
       "CheckoutReceipt": {
         "type": "object",
         "required": [
+          "order_id",
           "number",
           "email",
-          "payment_due"
+          "payment_due",
+          "placed_as_guest"
         ],
         "properties": {
           "email": {
@@ -27098,9 +27230,18 @@
           "number": {
             "type": "string"
           },
+          "order_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Selects the clean order page `/o/<order id>`; not a credential."
+          },
           "payment_due": {
             "type": "boolean",
             "description": "An online payment (Stripe, the fake gateway) is not completed yet."
+          },
+          "placed_as_guest": {
+            "type": "boolean",
+            "description": "The checkout was linked to an account, but the account origin vouched for no account or\nanother one, so the order belongs to no account (A2.4)."
           }
         }
       },
@@ -27826,6 +27967,27 @@
           "email": {
             "type": "string",
             "description": "The address, partly masked (`j***@example.com`)."
+          }
+        }
+      },
+      "ConfirmedPlacement": {
+        "type": "object",
+        "required": [
+          "order_id",
+          "number",
+          "as_guest"
+        ],
+        "properties": {
+          "as_guest": {
+            "type": "boolean",
+            "description": "The account origin vouched for no account or another one: the order is a guest order."
+          },
+          "number": {
+            "type": "string"
+          },
+          "order_id": {
+            "type": "string",
+            "format": "uuid"
           }
         }
       },
@@ -35053,6 +35215,32 @@
           },
           "payment": {
             "$ref": "#/components/schemas/PaymentStart"
+          }
+        }
+      },
+      "PlacementCallback": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "The account origin's placement code, from the callback URL."
+          },
+          "state": {
+            "type": "string",
+            "description": "From the callback URL."
+          }
+        },
+        "additionalProperties": false
+      },
+      "PlacementState": {
+        "type": "object",
+        "required": [
+          "state"
+        ],
+        "properties": {
+          "state": {
+            "type": "string",
+            "description": "For the account origin round trip (`<account origin>/placement?state=…`)."
           }
         }
       },
