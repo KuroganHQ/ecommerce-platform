@@ -1,17 +1,24 @@
 ---
 import { t } from "@platform/storefront-sdk/format";
 import Checkout from "../../layouts/Checkout.astro";
-import { checkoutApi, shopUrl } from "../../lib/api";
+import { checkoutApi, grantPageToken, shopUrl } from "../../lib/api";
 import { Button } from "../../ui.tsx";
 
 // Newsletter double opt-in (WP18, A20). Opening the link only shows the address; the button
 // confirms (a plain POST form, no JS), so mail scanners that follow links subscribe nobody.
 const api = checkoutApi(Astro.request);
 const token = Astro.url.searchParams.get("token") ?? "";
+const pageToken = grantPageToken(Astro.request);
 const done = Astro.url.searchParams.get("done");
+const invalidLink = Astro.url.searchParams.get("link") === "invalid";
+const error = Astro.url.searchParams.get("error") === "1";
 const [shop, pending] = await Promise.all([
   api.shop(),
-  done ? Promise.resolve(null) : api.newsletterConfirmation(token),
+  done || invalidLink
+    ? Promise.resolve(null)
+    : pageToken
+      ? api.newsletterConfirmationByGrant()
+      : api.newsletterConfirmation(token),
 ]);
 const m = shop?.messages ?? {};
 ---
@@ -23,6 +30,7 @@ const m = shop?.messages ?? {};
   lang={shop?.locale ?? "cs"}
   accountLabel={t(m, "account.nav")}
   accountUrl={shop?.account_url}
+  platformLinks={!pageToken}
 >
   <div class="grid max-w-xl gap-4">
     <h1 class="font-display text-2xl font-bold">{t(m, "nl.confirm_title")}</h1>
@@ -32,9 +40,22 @@ const m = shop?.messages ?? {};
           {t(m, "nl.confirmed")}
         </p>
       ) : pending ? (
-        <form method="post" action="/_p/newsletter/confirm" class="grid justify-items-start gap-4">
+        <form
+          method="post"
+          action={pageToken ? "/newsletter/confirm" : "/_p/newsletter/confirm"}
+          class="grid justify-items-start gap-4"
+        >
           <p>{t(m, "nl.confirm_intro", { email: pending.email })}</p>
-          <input type="hidden" name="token" value={token} />
+          {error && (
+            <p role="alert" class="font-medium text-error-700">
+              {t(m, "nl.error")}
+            </p>
+          )}
+          {pageToken ? (
+            <input type="hidden" name="_pt" value={pageToken} />
+          ) : (
+            <input type="hidden" name="token" value={token} />
+          )}
           <Button type="submit" variant="primary">
             {t(m, "nl.confirm_button")}
           </Button>
