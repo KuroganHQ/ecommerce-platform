@@ -339,7 +339,7 @@ fn plan(scope: &Scope, req: &SearchRequest, facets: bool, exclude: &[Uuid]) -> P
         .cloned()
         .chain(refinements.iter().map(|(_, c)| c.clone())));
     let price = format!("price.{}", market_key(&scope.market_code));
-    let sort: Vec<String> = match req.sort {
+    let mut sort: Vec<String> = match req.sort {
         Sort::Popular => vec!["popularity:desc".into(), "created_at:desc".into()],
         Sort::BestSelling => vec![
             format!("sales.{}:desc", market_key(&scope.market_code)),
@@ -354,6 +354,9 @@ fn plan(scope: &Scope, req: &SearchRequest, facets: bool, exclude: &[Uuid]) -> P
         }
         Sort::Relevance => vec![],
     };
+    if !sort.is_empty() {
+        sort.push("product_id:asc".into());
+    }
     let hits_filter = if exclude.is_empty() {
         all.clone()
     } else {
@@ -1123,7 +1126,7 @@ mod tests {
             );
             assert_eq!(
                 p.queries[0]["sort"],
-                json!(["popularity:desc", "created_at:desc"])
+                json!(["popularity:desc", "created_at:desc", "product_id:asc"])
             );
         }
     }
@@ -1137,11 +1140,11 @@ mod tests {
         for (sort, expected) in [
             (
                 Sort::BestSelling,
-                json!(["sales.sk_eu:desc", "created_at:desc"]),
+                json!(["sales.sk_eu:desc", "created_at:desc", "product_id:asc"]),
             ),
             (
                 Sort::TopRated,
-                json!(["rating_score:desc", "created_at:desc"]),
+                json!(["rating_score:desc", "created_at:desc", "product_id:asc"]),
             ),
         ] {
             for q in ["", "boty"] {
@@ -1183,11 +1186,14 @@ mod tests {
             false,
             &[],
         );
-        assert_eq!(p.queries[0]["sort"], json!(["price.sk_eu:desc"]));
+        assert_eq!(
+            p.queries[0]["sort"],
+            json!(["price.sk_eu:desc", "product_id:asc"])
+        );
         let p = plan(&s, &req(), false, &[]);
         assert_eq!(
             p.queries[0]["sort"],
-            json!(["popularity:desc", "created_at:desc"])
+            json!(["popularity:desc", "created_at:desc", "product_id:asc"])
         );
         let p = plan(
             &s,

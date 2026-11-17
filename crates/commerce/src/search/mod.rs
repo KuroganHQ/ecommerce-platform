@@ -41,7 +41,7 @@ pub const SETTINGS_UPGRADE_JOB: &str = "search.settings_upgrade";
 /// Bumped whenever [`index::settings`] changes; worker start and a periodic job queue a full
 /// rebuild for tenants whose indexes were not rebuilt at this version
 /// ([`index::queue_settings_upgrades`]).
-pub const SETTINGS_VERSION: i32 = 3;
+pub const SETTINGS_VERSION: i32 = 4;
 
 /// Meilisearch outages can last a while; indexing jobs keep retrying (capped backoff).
 const JOB_ATTEMPTS: i32 = 25;

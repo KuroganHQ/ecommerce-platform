@@ -125,7 +125,7 @@ pub struct ProductData {
     pub id: Uuid,
     pub active: bool,
     pub brand: Option<String>,
-    pub created_at: i64,
+    pub created_at_micros: i64,
     /// Time-decayed sales/interest score from the recommendation rollups (WP17).
     pub popularity: i32,
     /// market id → time-decayed unit sales (`product_search_sales`); markets without sales absent.
@@ -202,7 +202,7 @@ pub async fn load_products(
                 id: r.id,
                 active: r.status == "active",
                 brand: r.brand,
-                created_at: r.created_at.timestamp(),
+                created_at_micros: r.created_at.timestamp_micros(),
                 popularity: r.popularity,
                 ..Default::default()
             },
@@ -468,7 +468,7 @@ pub fn build_product(ctx: &Context, p: &ProductData) -> BTreeMap<String, Vec<Val
                 "is_default": v.is_default,
                 "popularity": p.popularity,
                 "sales": sales,
-                "created_at": p.created_at,
+                "created_at": p.created_at_micros,
             });
             if let Some(score) = p.rating_score {
                 doc["rating_score"] = json!(score);
@@ -564,7 +564,7 @@ mod tests {
             id: Uuid::from_u128(500),
             active: true,
             brand: Some("Acme".into()),
-            created_at: 1,
+            created_at_micros: 1,
             popularity: 42,
             sales: HashMap::new(),
             rating_score: None,
