@@ -239,3 +239,42 @@ test("the theme's consent banner is recorded, then changed on the preferences pa
   await expect(page.getByRole("button", { name: "Nastavení cookies" })).toBeVisible();
   await expect(page.getByRole("region", { name: "Souhlas s cookies" })).toBeHidden();
 });
+
+test("an untrusted theme cannot change the signed-in customer's email preferences", async () => {
+  await page.goto(`${account}/account/consent`);
+  const newsletter = page.getByRole("checkbox", { name: "E-mailový marketing" });
+  if (!(await newsletter.isChecked())) {
+    await page.getByText("E-mailový marketing", { exact: true }).click();
+    await page.getByRole("button", { name: "Uložit výběr" }).click();
+    await expect(page.getByRole("status")).toHaveText("Uloženo.");
+  }
+
+  await page.goto(`${shop}/p/tricko-basic`);
+  const statuses = await page.evaluate(async () => {
+    const post = (body: unknown) =>
+      fetch("/_p/consent", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      }).then((r) => r.status);
+    return [
+      await post({
+        purposes: { email_marketing: false },
+        text_version: "2026-10-16",
+        source: "preferences",
+      }),
+      await post({
+        purposes: { review_invites: true },
+        text_version: "2026-10-16",
+        source: "linked",
+      }),
+      await post({ purposes: { ads: false }, text_version: "2026-10-16", source: "account" }),
+    ];
+  });
+  expect(statuses).toEqual([422, 422, 200]);
+  const consent = (await page.context().cookies(shop)).filter((c) => c.name === "consent");
+  expect(consent.map((c) => c.value)).toEqual(["analytics%2Cpersonalization"]);
+
+  await page.goto(`${account}/account/consent`);
+  await expect(page.getByRole("checkbox", { name: "E-mailový marketing" })).toBeChecked();
+});
