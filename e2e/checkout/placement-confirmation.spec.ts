@@ -4,6 +4,7 @@ import {
   ACCOUNT,
   acceptAndPlace,
   checkoutReady,
+  chooseCashOnDelivery,
   FRESH,
   saveAddresses,
   saveContact,
@@ -52,12 +53,16 @@ async function linkedReview(page: Page, email: string) {
   await page.waitForURL(`${FRESH}/checkout`);
   await saveAddresses(page);
   await checkoutReady(page);
+  await chooseCashOnDelivery(page, /PPL – kurýr/, /Testovací platba/);
 }
 
-function navigations(page: Page): string[] {
-  const seen: string[] = [];
+function navigations(page: Page): { requested: string[]; committed: string[] } {
+  const seen = { requested: [] as string[], committed: [] as string[] };
+  page.on("request", (r) => {
+    if (r.isNavigationRequest() && r.frame() === page.mainFrame()) seen.requested.push(r.url());
+  });
   page.on("framenavigated", (frame) => {
-    if (frame === page.mainFrame()) seen.push(frame.url());
+    if (frame === page.mainFrame()) seen.committed.push(frame.url());
   });
   return seen;
 }
@@ -82,11 +87,15 @@ test("a linked checkout placed with no account signed in shows the guest result 
   );
   await expect(receipt).toContainText(`Potvrzení pošleme na ${buyer}`);
   expect(
-    seen.some((u) => u.includes("/_p/fake-pay/")),
+    seen.requested.some((u) => u.includes("/_p/fake-pay/")),
     "no payment step before the guest result",
   ).toBe(false);
-  expect(seen.some((u) => u.startsWith(`${ACCOUNT}/placement`))).toBe(true);
-  for (const u of seen) expect(new URL(u).searchParams.has("code"), u).toBe(false);
+  expect(seen.requested.some((u) => u.startsWith(`${ACCOUNT}/placement?`))).toBe(true);
+  expect(seen.requested.some((u) => u.startsWith(`${FRESH}/checkout/placement?`))).toBe(true);
+  for (const u of seen.committed)
+    expect(new URL(u).searchParams.has("code"), `no rendered page holds the code: ${u}`).toBe(
+      false,
+    );
 
   await page.getByRole("link", { name: "Pokračovat k objednávce" }).click();
   await page.waitForURL(CLEAN_ORDER);
