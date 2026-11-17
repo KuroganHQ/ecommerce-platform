@@ -271,7 +271,7 @@ describe("confirmation, preference and unsubscribe forms use the grant and _pt (
 
   test.each(FORMS)("POST %s from a script or another site is refused", async (form) => {
     for (const h of [
-      { "sec-fetch-mode": "cors", "sec-fetch-dest": "empty" },
+      { "sec-fetch-mode": "cors", "sec-fetch-dest": "empty" } as Record<string, string>,
       { origin: "http://evil.example", "sec-fetch-site": "cross-site" },
     ]) {
       const res = await post(form, `_pt=${tokenOf(GRANT)}`, {
