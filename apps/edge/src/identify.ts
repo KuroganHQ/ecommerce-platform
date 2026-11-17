@@ -13,7 +13,6 @@ export const CLEAR_IDT_COOKIE = `${IDT_COOKIE}=; Path=/; HttpOnly; Secure; SameS
 
 export const isIdentifyValue = (v: unknown): v is string => typeof v === "string" && VALUE.test(v);
 
-/** The market's account origin: the shop origin's scheme and port on the account host. */
 export function accountOrigin(site: {
   shopOrigin?: string | undefined;
   account_host?: string | undefined;
@@ -30,7 +29,6 @@ export function identifyUrl(account: string, state: string, shopOrigin: string):
   return url.href;
 }
 
-/** Exactly one `state` and one `code`, nothing else (A2 step 2). */
 export function callbackParameters(url: URL): { state: string; code: string } | null {
   const params = [...url.searchParams];
   const state = url.searchParams.getAll("state");

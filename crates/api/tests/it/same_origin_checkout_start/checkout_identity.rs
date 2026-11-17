@@ -1,6 +1,3 @@
-//! A2 steps 1-3, checkout half: `state`-bound identify against the real account-code issuer
-//! (`POST /storefront/v1/customer/account-codes` with a real customer session).
-
 use super::pii_rotation::{addresses, contact, holds_a_capability, place_body};
 use super::*;
 

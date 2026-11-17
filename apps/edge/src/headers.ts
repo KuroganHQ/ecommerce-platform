@@ -51,7 +51,6 @@ export function contentSecurityPolicy(
      * pay (the checkout and the order page), never on account pages (WP11).
      */
     stripe?: boolean;
-    /** The account origin the checkout's sign-in form redirects to (A2 step 1). */
     formOrigin?: string;
     /** Who may frame the page (theme previews: the admin origin, A21); default nobody. */
     frameAncestors?: string;
