@@ -5887,7 +5887,7 @@ export interface components {
             by: string;
             /**
              * Format: int32
-             * @description [`ATTESTATION_VERSION`] when they attested.
+             * @description The version of the attestation text they accepted.
              */
             version: number;
         };

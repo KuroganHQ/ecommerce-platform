@@ -122,9 +122,6 @@ impl Ctx {
         }
     }
 
-    /// A request holding the fence queues the admin switch to `mode`, `ops` queue behind the
-    /// switch; the request then locks every cart of the shop, as a placement would, and
-    /// commits. An op that locked a cart before the fence deadlocks here.
     async fn across_switch(
         &self,
         mode: &'static str,

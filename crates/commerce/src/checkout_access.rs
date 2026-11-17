@@ -1,9 +1,9 @@
 //! Checkout credentials bound to an exact shop origin, its mode and the tenant's checkout
 //! fence generation (same-origin-checkout.md, Routing, C4, C6, C10).
 //!
-//! Lock order, for every transaction that touches checkout credentials:
+//! Lock order of every transaction that takes the checkout fence:
 //!
-//! 1. The tenant's checkout fence: shared by every request ([`enter`], [`fence`]), exclusive by
+//! 1. The tenant's checkout fence: shared by every request (`enter`, `fence`), exclusive by
 //!    [`switch_mode`]. Taken before any row lock: a request holding a row while it waits for
 //!    the fence behind a queued switch would deadlock with the request that holds the fence and
 //!    waits for that row.
@@ -11,9 +11,9 @@
 //!    `platform.checkout_fences` row (the mode trigger).
 //! 3. A shop cart before any checkout cart started from it.
 //! 4. Then the rows the operation reaches through its checkout: identify and placement state,
-//!    account codes, link grants, idempotency keys, orders, stock and coupons. Handoff
-//!    redemption alone locks its handoff before the cart it binds; no path locks a live handoff
-//!    after a cart.
+//!    account codes, link grants, idempotency keys, orders, stock and coupons. Redeeming a
+//!    handoff or a restore link locks that link before the cart it binds; no path locks a live
+//!    handoff or restore link after a cart.
 
 use chrono::{Duration, Utc};
 use platform::Error;
@@ -530,10 +530,9 @@ pub async fn restore_cart(
 }
 
 /// Switches one origin of the tenant to `mode` as `actor`, audited, revoking every checkout
-/// credential of the tenant, aliases included, once the transaction commits: the mode trigger
-/// increments the tenant's fence generation. Waits for in-flight checkout transactions of the
-/// tenant. `false`, changing nothing, when the origin already has `mode`; an unknown history
-/// refuses same-origin (`409 origin_history_unknown`).
+/// credential of the tenant, aliases included, once the transaction commits. Waits for in-flight
+/// checkout transactions of the tenant. `false`, changing nothing, when the origin already has
+/// `mode`; an unknown history refuses same-origin (`409 origin_history_unknown`).
 pub async fn switch_mode(
     tx: &mut TenantTx,
     actor: &str,

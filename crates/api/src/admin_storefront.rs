@@ -1,5 +1,4 @@
-//! Storefront Admin API: redirects (spec §7.5, §9.5), the public storefront token (§5.5) and
-//! the checkout policy of each shop origin (same-origin-checkout.md, C3 and Routing).
+//! Storefront Admin API: redirects (spec §7.5, §9.5) and the public storefront token (§5.5).
 
 use axum::Json;
 use axum::body::Bytes;

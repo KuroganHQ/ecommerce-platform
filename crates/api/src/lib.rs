@@ -112,7 +112,6 @@ pub struct AppState {
     pub carriers: Option<commerce::carriers::Carriers>,
     pub experiments: Option<commerce::experiments::ExperimentKey>,
     pub fetch: platform::http::SafeClient,
-    /// `SAME_ORIGIN_CHECKOUT_READY`: origins may switch to same-origin checkout (SHOP-54).
     pub same_origin_ready: bool,
 }
 

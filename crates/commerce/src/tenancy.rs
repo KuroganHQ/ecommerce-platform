@@ -497,7 +497,7 @@ pub struct Attestation {
     /// The staff user who attested.
     pub by: String,
     pub at: DateTime<Utc>,
-    /// [`ATTESTATION_VERSION`] when they attested.
+    /// The version of the attestation text they accepted.
     pub version: i32,
 }
 
@@ -508,7 +508,7 @@ pub struct CheckoutOrigin {
     pub mode: CheckoutMode,
     pub mode_generation: i64,
     pub history: OriginHistory,
-    /// Set for [`OriginHistory::MerchantAttestedNeverServed`] only.
+    /// Present when `history` is `merchant_attested_never_served`.
     pub attestation: Option<Attestation>,
 }
 

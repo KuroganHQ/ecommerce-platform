@@ -26611,7 +26611,7 @@
           "version": {
             "type": "integer",
             "format": "int32",
-            "description": "[`ATTESTATION_VERSION`] when they attested."
+            "description": "The version of the attestation text they accepted."
           }
         }
       },
@@ -28517,7 +28517,7 @@
             "oneOf": [
               {
                 "$ref": "#/components/schemas/Attestation",
-                "description": "Set for [`OriginHistory::MerchantAttestedNeverServed`] only."
+                "description": "Present when `history` is `merchant_attested_never_served`."
               },
               {
                 "type": "null"
