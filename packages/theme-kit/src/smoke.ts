@@ -115,7 +115,7 @@ try {
     await page.waitForURL(/\/_p\/checkout\/start$/);
     await expect(page.getByRole("heading", { name: /preview/i })).toBeVisible();
   } else {
-    await page.waitForURL(/\/\/checkout\./);
+    await page.waitForURL((u) => u.hostname.startsWith("checkout.") || u.pathname === "/checkout");
     await expect(page.getByRole("heading", { name: /Souhrn|Súhrn|Summary/ })).toBeVisible();
     // The checkout origin shows the same cart: same total (incl. VAT) and the VAT recap.
     await expect(page.getByTestId("checkout-total")).toHaveText(before.total.formatted);
