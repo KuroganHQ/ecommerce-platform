@@ -351,6 +351,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/storefront/v1/customer/account-codes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * A2 account half: a code that tells a same-origin checkout who is signed in on the account
+         *     origin. Called by the edge for `/identify` and `/placement`.
+         */
+        post: operations["issue_account_code"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/storefront/v1/customer/addresses": {
         parameters: {
             query?: never;
@@ -1230,6 +1250,17 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        AccountCode: {
+            /** @description Single use, valid 60 s, for `<origin>/checkout/<purpose>`. */
+            code: string;
+        };
+        AccountCodeRequest: {
+            /** @description The exact same-origin checkout origin to call back. */
+            origin: string;
+            purpose: components["schemas"]["Purpose"];
+            /** @description The checkout's opaque `state`: 16-128 characters of `A-Z a-z 0-9 _ -`. */
+            state: string;
+        };
         Address: {
             city: string;
             company?: string | null;
@@ -2166,6 +2197,8 @@ export interface components {
             /** @description Written through a review link of a delivered order line. */
             verified: boolean;
         };
+        /** @enum {string} */
+        Purpose: "identify" | "placement";
         /** @description Per-purpose choices: `None` = not asked (or not part of this choice). */
         Purposes: {
             ads?: boolean | null;
@@ -3518,6 +3551,56 @@ export interface operations {
                 };
             };
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    issue_account_code: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description The tenant's public storefront token. */
+                "X-Storefront-Token": string;
+                /** @description Market id resolved from the shop host by the edge. */
+                "X-Market": string;
+                /** @description Locale hint (one of the market's locales). */
+                "X-Locale"?: string | null;
+                /** @description Session token from the checkout origin's `__Host-sid` cookie (set by the edge). */
+                "X-Customer-Session": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AccountCodeRequest"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountCode"];
+                };
+            };
+            /** @description invalid_callback */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description not_signed_in (identify only) */
+            401: {
                 headers: {
                     [name: string]: unknown;
                 };

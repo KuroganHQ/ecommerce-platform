@@ -988,3 +988,219 @@ async fn account_consent_rejects_cookie_purposes(db: PgPool) {
         .unwrap();
     assert_eq!(records, 0);
 }
+
+const STATE: &str = "state_0123456789abcdef";
+
+async fn same_origin_checkout(
+    c: &Ctx,
+    tenant: Uuid,
+    origin: &commerce::checkout_access::ShopOrigin,
+) {
+    sqlx::query(
+        "UPDATE platform.checkout_origins SET history = 'merchant_attested_never_served',
+             attested_by = 'user-owner', attested_at = now(), attestation_version = 1
+         WHERE origin = $1",
+    )
+    .bind(origin.as_str())
+    .execute(&c.owner)
+    .await
+    .unwrap();
+    assert!(
+        commerce::checkout_access::switch_mode(
+            &c.runtime,
+            tenant,
+            origin,
+            commerce::tenancy::CheckoutMode::SameOrigin,
+        )
+        .await
+        .unwrap()
+    );
+}
+
+fn account_code(purpose: &str, state: &str, origin: &str) -> Call<'static> {
+    Call::post(
+        "/storefront/v1/customer/account-codes",
+        json!({"purpose": purpose, "state": state, "origin": origin}),
+    )
+}
+
+async fn account_codes_issued(c: &Ctx) -> i64 {
+    let mut tx = platform::db::tenant_tx(&c.runtime, c.shop.tenant)
+        .await
+        .unwrap();
+    sqlx::query_scalar("SELECT count(*) FROM account_codes")
+        .fetch_one(&mut *tx)
+        .await
+        .unwrap()
+}
+
+async fn consume_code(
+    c: &Ctx,
+    purpose: commerce::account_codes::Purpose,
+    code: &str,
+) -> Option<commerce::account_codes::AccountEvidence> {
+    let mut tx = platform::db::tenant_tx(&c.runtime, c.shop.tenant)
+        .await
+        .unwrap();
+    let out = commerce::account_codes::consume(&mut tx, purpose, STATE, &c.shop.origin, code)
+        .await
+        .unwrap();
+    tx.commit().await.unwrap();
+    out
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn account_code_callback_is_an_exact_same_origin_checkout_origin_of_the_market(db: PgPool) {
+    let c = setup(db).await;
+    let (session, _) = c.sign_in("ana@example.test", &[]).await;
+    let ask = |state: &str, origin: &str| {
+        c.call(
+            account_code("identify", state, origin).header("x-customer-session", session.clone()),
+        )
+    };
+    let origin = c.shop.origin.as_str().to_owned();
+    assert_eq!(origin, "https://shop.localhost");
+    let (status, body, _) = ask(STATE, &origin).await;
+    assert_eq!(
+        status,
+        StatusCode::BAD_REQUEST,
+        "an isolated origin is no callback: {body}"
+    );
+
+    same_origin_checkout(&c, c.shop.tenant, &c.shop.origin).await;
+    same_origin_checkout(&c, c.shop.tenant, &c.shop.sk_origin).await;
+    same_origin_checkout(&c, c.other.tenant, &c.other.origin).await;
+    for bad in [
+        "",
+        "null",
+        "shop.localhost",
+        "//shop.localhost",
+        "https://shop.localhost/",
+        "https://shop.localhost/checkout/identify",
+        "https://shop.localhost?x=1",
+        "https://shop.localhost#",
+        "https://SHOP.localhost",
+        "https://Shop.Localhost",
+        "HTTPS://shop.localhost",
+        "http://shop.localhost",
+        "https://shop.localhost:443",
+        "https://shop.localhost:8443",
+        "https://shop.localhost.",
+        "https://shop.localhost.attacker.example",
+        "https://attacker.example/https://shop.localhost",
+        "https://attacker.example?https://shop.localhost",
+        "https://attacker.example#https://shop.localhost",
+        "https://user@shop.localhost",
+        "https://shop.localhost@attacker.example",
+        "https://shop%2elocalhost",
+        "https://%73hop.localhost",
+        "https://xshop.localhost",
+        "https://hop.localhost",
+        " https://shop.localhost",
+        "https://shop.localhost ",
+        "https://shop.localhost\n",
+        c.shop.sk_origin.as_str(),
+        c.other.origin.as_str(),
+    ] {
+        let (status, body, _) = ask(STATE, bad).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{bad:?} {body}");
+        assert_eq!(body["code"], "invalid_callback", "{bad:?}");
+    }
+    for bad in [
+        "",
+        "short",
+        &"a".repeat(129),
+        "state with spaces 0123",
+        "state_0123456789&code=1",
+        "state_0123456789abcdé",
+    ] {
+        let (status, _, _) = ask(bad, &origin).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "state {bad:?}");
+    }
+    assert_eq!(account_codes_issued(&c).await, 0);
+
+    let (status, body, res) = ask(STATE, &origin).await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    assert_eq!(res.headers()["cache-control"], "no-store");
+    assert!(commerce::capability::well_formed(
+        body["code"].as_str().unwrap()
+    ));
+    let (status, _, _) = sf(
+        account_code("identify", STATE, c.shop.sk_origin.as_str())
+            .header("x-customer-session", session.clone()),
+        &c.shop,
+        c.shop.sk,
+    )
+    .send(&c.s)
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::CREATED,
+        "the SK market calls back to its own origin"
+    );
+    assert_eq!(account_codes_issued(&c).await, 2);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn identify_needs_a_session_and_placement_never_does(db: PgPool) {
+    use commerce::account_codes::{AccountEvidence, Purpose};
+    let c = setup(db).await;
+    same_origin_checkout(&c, c.shop.tenant, &c.shop.origin).await;
+    let origin = c.shop.origin.as_str();
+    let (session, signed) = c.sign_in("ana@example.test", &[]).await;
+    let ana: Uuid = signed["customer"]["id"].as_str().unwrap().parse().unwrap();
+
+    let (status, body, _) = c.call(account_code("identify", STATE, origin)).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert_eq!(body["code"], "not_signed_in");
+    let (status, _, _) = c
+        .call(account_code("identify", STATE, origin).header("x-customer-session", "f".repeat(64)))
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::UNAUTHORIZED,
+        "an unknown session is no session"
+    );
+    let (status, _, _) = c
+        .call(account_code("identify", STATE, "https://attacker.example"))
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::BAD_REQUEST,
+        "the origin is checked before the session"
+    );
+
+    let (status, body, _) = c
+        .call(account_code("identify", STATE, origin).header("x-customer-session", session.clone()))
+        .await;
+    assert_eq!(status, StatusCode::CREATED);
+    assert_eq!(
+        consume_code(&c, Purpose::Identify, body["code"].as_str().unwrap()).await,
+        Some(AccountEvidence {
+            customer_id: Some(ana)
+        })
+    );
+
+    let (status, body, _) = c.call(account_code("placement", STATE, origin)).await;
+    assert_eq!(status, StatusCode::CREATED);
+    assert_eq!(
+        consume_code(&c, Purpose::Placement, body["code"].as_str().unwrap()).await,
+        Some(AccountEvidence { customer_id: None })
+    );
+    let (status, body, _) = c
+        .call(
+            account_code("placement", STATE, origin).header("x-customer-session", session.clone()),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED);
+    assert_eq!(
+        consume_code(&c, Purpose::Placement, body["code"].as_str().unwrap()).await,
+        Some(AccountEvidence {
+            customer_id: Some(ana)
+        })
+    );
+    let (status, _, _) = c
+        .call(account_code("placement", STATE, "https://attacker.example"))
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}

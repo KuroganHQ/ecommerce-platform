@@ -14,6 +14,7 @@ use axum::extract::rejection::PathRejection;
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
+use commerce::account_codes::{self, Purpose};
 use commerce::consent::{self, ConsentChoice, ConsentState};
 use commerce::customers::{
     self, Address, AddressInput, CustomerView, MagicLinkRequest, MagicLinkToken, PasswordChange,
@@ -55,6 +56,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
         .routes(routes!(my_orders))
         .routes(routes!(my_order))
         .routes(routes!(get_account_consent, post_account_consent))
+        .routes(routes!(issue_account_code))
 }
 
 pub(crate) fn header_str<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
@@ -526,4 +528,62 @@ async fn my_order(
     })
     .await?;
     Ok(no_store(Json(view).into_response()))
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct AccountCodeRequest {
+    pub purpose: Purpose,
+    /// The checkout's opaque `state`: 16-128 characters of `A-Z a-z 0-9 _ -`.
+    pub state: String,
+    /// The exact same-origin checkout origin to call back.
+    pub origin: String,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct AccountCode {
+    /// Single use, valid 60 s, for `<origin>/checkout/<purpose>`.
+    pub code: String,
+}
+
+/// A2 account half: a code that tells a same-origin checkout who is signed in on the account
+/// origin. Called by the edge for `/identify` and `/placement`.
+#[utoipa::path(
+    post,
+    path = "/storefront/v1/customer/account-codes",
+    tag = "storefront",
+    params(StorefrontHeaders, SessionHeader),
+    request_body = AccountCodeRequest,
+    responses(
+        (status = 201, body = AccountCode),
+        (status = 400, description = "invalid_callback", body = platform::Problem, content_type = "application/problem+json"),
+        (status = 401, description = "not_signed_in (identify only)", body = platform::Problem, content_type = "application/problem+json"),
+    )
+)]
+async fn issue_account_code(
+    shopper: Shopper,
+    State(s): State<AppState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<Response, Error> {
+    let input: AccountCodeRequest = parse_json(&body)?;
+    let token = header_str(&headers, SESSION_HEADER);
+    let code = with_ctx(&s, &shopper, async |tx, ctx| {
+        let cb = account_codes::callback(
+            tx,
+            ctx.market.id,
+            input.purpose,
+            &input.state,
+            &input.origin,
+        )
+        .await?;
+        let customer = match token {
+            Some(t) => customers::authenticate(tx, t).await?.map(|s| s.customer_id),
+            None => None,
+        };
+        account_codes::issue(tx, &cb, customer).await
+    })
+    .await?;
+    Ok(no_store(
+        (StatusCode::CREATED, Json(AccountCode { code })).into_response(),
+    ))
 }

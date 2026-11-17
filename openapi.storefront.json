@@ -1981,6 +1981,98 @@
         }
       }
     },
+    "/storefront/v1/customer/account-codes": {
+      "post": {
+        "tags": [
+          "storefront"
+        ],
+        "summary": "A2 account half: a code that tells a same-origin checkout who is signed in on the account\norigin. Called by the edge for `/identify` and `/placement`.",
+        "operationId": "issue_account_code",
+        "parameters": [
+          {
+            "name": "X-Storefront-Token",
+            "in": "header",
+            "description": "The tenant's public storefront token.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Market",
+            "in": "header",
+            "description": "Market id resolved from the shop host by the edge.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-Locale",
+            "in": "header",
+            "description": "Locale hint (one of the market's locales).",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "X-Customer-Session",
+            "in": "header",
+            "description": "Session token from the checkout origin's `__Host-sid` cookie (set by the edge).",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccountCodeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountCode"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_callback",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "not_signed_in (identify only)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/storefront/v1/customer/addresses": {
       "get": {
         "tags": [
@@ -6606,6 +6698,39 @@
   },
   "components": {
     "schemas": {
+      "AccountCode": {
+        "type": "object",
+        "required": [
+          "code"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "Single use, valid 60 s, for `<origin>/checkout/<purpose>`."
+          }
+        }
+      },
+      "AccountCodeRequest": {
+        "type": "object",
+        "required": [
+          "purpose",
+          "state",
+          "origin"
+        ],
+        "properties": {
+          "origin": {
+            "type": "string",
+            "description": "The exact same-origin checkout origin to call back."
+          },
+          "purpose": {
+            "$ref": "#/components/schemas/Purpose"
+          },
+          "state": {
+            "type": "string",
+            "description": "The checkout's opaque `state`: 16-128 characters of `A-Z a-z 0-9 _ -`."
+          }
+        }
+      },
       "Address": {
         "type": "object",
         "required": [
@@ -9953,6 +10078,13 @@
             "description": "Written through a review link of a delivered order line."
           }
         }
+      },
+      "Purpose": {
+        "type": "string",
+        "enum": [
+          "identify",
+          "placement"
+        ]
       },
       "Purposes": {
         "type": "object",
