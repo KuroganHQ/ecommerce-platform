@@ -1,10 +1,3 @@
-/**
- * Customer account on its own origin (SHOP-95, A1, A5, A20) against the seeded demo shop
- * (`make up && make seed`): email-link sign-in via Mailpit, addresses, password, sign-out,
- * password sign-in, email preferences, old account links redirected there, and the theme's
- * consent banner → the platform record → the checkout origin's preferences page.
- */
-
 import { expect, type Page, test } from "@playwright/test";
 import { expectAccessible, mailpit, run } from "../admin/support";
 import { testContext } from "../rate-client";

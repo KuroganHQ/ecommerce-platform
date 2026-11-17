@@ -773,7 +773,6 @@ async fn consent_is_recorded_and_resolved_for_the_anonymous_subject(db: PgPool) 
         assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
     }
 
-    // A session sent along is ignored: storefront consent knows only the anonymous subject.
     let (session, _) = c.sign_in("k@example.test", &[]).await;
     let (status, _, _) = c
         .call(

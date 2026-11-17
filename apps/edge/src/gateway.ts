@@ -944,11 +944,6 @@ ${
     });
   }
 
-  /**
-   * `/_p/consent` on both origins (A20): the choice is recorded by the API, which mints the
-   * anonymous subject on the first one. The cookies are scoped to the shop host so the
-   * checkout subdomain's preferences page shares them.
-   */
   async function consentProxy(
     site: Site,
     req: Request,
@@ -1825,11 +1820,6 @@ ${
 
   // --- origins -------------------------------------------------------------------------------
 
-  /**
-   * Old account links on the shop and checkout origins (SHOP-95): `308` to the same page on the
-   * market's account origin. Only paths the strict account page pattern accepts move; the
-   * target origin comes from the resolver, never from the request.
-   */
   function legacyAccountRedirect(site: Site, url: URL): Response | null {
     const page = ACCOUNT_PAGE_RE.exec(url.pathname)?.[0];
     if (!page) return null;

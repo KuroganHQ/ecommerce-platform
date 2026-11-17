@@ -1,11 +1,3 @@
-/**
- * Checkout and order placement (WP10) against the seeded demo shop
- * (`make up && make seed`): guest checkout with a Packeta pickup point from
- * the mock widget and the fake gateway, the confirmation page and email, SK home delivery,
- * a failed payment retried, coupon + sale totals, guest-only checkout for a signed-in customer
- * (SHOP-95), and a guest order linked after an email-link sign-in (A5).
- */
-
 import { randomBytes } from "node:crypto";
 import { type APIResponse, expect, type Locator, type Page, request, test } from "@playwright/test";
 import { expectAccessible, magicLink, mailpit, run, sql, useEnglish } from "../admin/support";

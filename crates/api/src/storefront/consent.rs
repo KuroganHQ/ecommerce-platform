@@ -2,7 +2,6 @@
 //! edge. The anonymous subject id travels in `X-Consent-Subject` (the edge's consent cookie);
 //! a new one is minted on the first choice and returned in the same header, together with
 //! `X-Consent-Summary` for the script-readable cookie (see `docs/decisions/consent-contract.md`).
-//! Only the anonymous subject: a customer's email purposes live on the account origin.
 
 use axum::Json;
 use axum::body::Bytes;
