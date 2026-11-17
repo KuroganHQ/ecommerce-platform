@@ -16,6 +16,7 @@ const PROBLEMS: Record<string, Problem> = {
   invalid_address: { step: "addresses", field: null, message: "address.invalid" },
   ship_to_not_allowed: { step: "addresses", field: null, message: "checkout.ship_to_not_allowed" },
   stale_page: { step: null, field: null, message: "checkout.stale_page" },
+  identify_failed: { step: null, field: null, message: "checkout.identify_failed" },
 };
 const FAILED: Problem = { step: null, field: null, message: "checkout.details_failed" };
 

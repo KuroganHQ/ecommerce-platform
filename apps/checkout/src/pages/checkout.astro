@@ -3,6 +3,7 @@ import { t } from "@platform/storefront-sdk/format";
 import AddressesForm from "../components/AddressesForm.astro";
 import ContactForm from "../components/ContactForm.astro";
 import Receipt from "../components/Receipt.astro";
+import SavedAddresses from "../components/SavedAddresses.astro";
 import CheckoutForm from "../islands/CheckoutForm";
 import DetailsSummary from "../islands/DetailsSummary";
 import SubmitOnce from "../islands/SubmitOnce";
@@ -22,6 +23,7 @@ const token = open ? pageToken(Astro.request) : undefined;
 const draft = Astro.request.method === "POST" ? await Astro.request.formData() : undefined;
 const page = open ? checkoutPage(view, Astro.url, draft) : null;
 const notice = page?.problem?.step === null ? page.problem : null;
+const saved = page?.kind === "addresses" ? await api.savedAddresses() : [];
 ---
 
 <Checkout
@@ -80,6 +82,15 @@ const notice = page?.problem?.step === null ? page.problem : null;
               view={view}
               step="contact"
               editHref="/checkout?edit=contact"
+            />
+          )}
+          {page.kind === "addresses" && (
+            <SavedAddresses
+              m={m}
+              locale={locale}
+              countries={view.ship_to_countries}
+              pageToken={token ?? ""}
+              addresses={saved}
             />
           )}
           {page.kind === "contact" ? (

@@ -272,6 +272,14 @@ describe("checkoutPage opens one editor from the view, edit and the draft", () =
     });
   });
 
+  test("a sign-in that could not finish is a page-level notice", () => {
+    expect(checkoutPage(BOTH, at("?error=identify_failed")).problem).toEqual({
+      step: null,
+      field: null,
+      message: "checkout.identify_failed",
+    });
+  });
+
   test.each(["failed", "nope", "toString", "__proto__", "constructor", "hasOwnProperty"])(
     "the code %s reads as failed",
     (code) => {
@@ -452,6 +460,10 @@ describe("the new checkout messages", () => {
     "checkout.details_failed",
     "checkout.stale_page",
     "checkout.payment_not_completed",
+    "checkout.have_account",
+    "checkout.saved_addresses",
+    "checkout.use_address",
+    "checkout.identify_failed",
   ];
   const catalogs: [string, Record<string, string>][] = [
     ["en", en],
