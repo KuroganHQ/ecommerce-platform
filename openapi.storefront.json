@@ -8957,6 +8957,13 @@
           },
           "name": {
             "type": "string"
+          },
+          "swatch": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Colour swatch as `#rrggbb`."
           }
         }
       },

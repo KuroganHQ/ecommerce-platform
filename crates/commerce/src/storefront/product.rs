@@ -22,6 +22,8 @@ use crate::catalog::products::{Gpsr, GpsrParty};
 pub struct OptionValueView {
     pub code: String,
     pub name: String,
+    /// Colour swatch as `#rrggbb`.
+    pub swatch: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, ToSchema)]
@@ -294,7 +296,8 @@ pub async fn product_page(
                             .get("name_i18n")
                             .and_then(|n| ctx.text(n))
                             .unwrap_or_else(|| code.clone());
-                        Some(OptionValueView { code, name })
+                        let swatch = v.get("swatch").and_then(Value::as_str).map(str::to_owned);
+                        Some(OptionValueView { code, name, swatch })
                     })
                     .collect()
             })
