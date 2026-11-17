@@ -98,8 +98,8 @@ describe("account origin (SHOP-95 slice 1, A1)", () => {
       "/review",
       "/restore-cart",
       "/start?h=x",
-      "/identify",
-      "/placement",
+      "/identify/x",
+      "/placement/",
       "/account/other",
       "/account/orders/not-a-uuid",
       "/accounts",
@@ -247,6 +247,69 @@ describe("account origin (SHOP-95 slice 1, A1)", () => {
     for (const res of responses) {
       for (const name of res.headers.keys()) expect(name).not.toMatch(/^access-control-/);
     }
+  });
+});
+
+const SO = "http://so.localhost:8280";
+const STATE = "state_0123456789abcdef";
+const CODE = "c".repeat(64);
+const a2 = (path: string, origin: string, extra = "") =>
+  `${ACC}${path}?state=${STATE}&origin=${encodeURIComponent(origin)}${extra}`;
+
+const expectSeeOther = async (res: Response, location: string) => {
+  expect(res.status, location).toBe(303);
+  expect(res.headers.get("location")).toBe(location);
+  expect(res.headers.get("cache-control")).toBe("no-store");
+  expect(res.headers.get("referrer-policy")).toBe("no-referrer");
+  expect(await res.text()).toBe("");
+};
+
+describe("A2 account half (SHOP-95 slice 3)", () => {
+  test("identify_rejects_unregistered_origin", async () => {
+    for (const path of ["/identify", "/placement"]) {
+      api.calls.length = 0;
+      const res = await get(a2(path, "http://evil.example"), { cookie: SESSION });
+      expect(res.status, path).toBe(400);
+      expect(res.headers.get("location"), path).toBeNull();
+      expect(res.headers.get("cache-control"), path).toBe("no-store");
+      const sent = api.calls.at(-1);
+      expect(sent?.url).toBe("http://api.test/storefront/v1/customer/account-codes");
+      expect(JSON.parse(sent?.body ?? "{}")).toEqual({
+        purpose: path.slice(1),
+        state: STATE,
+        origin: "http://evil.example",
+      });
+      expect(sent?.headers["x-customer-session"]).toBe("sessiontoken_000000000001");
+      const missing = await get(`${ACC}${path}?state=${STATE}`, { cookie: SESSION });
+      expect(missing.status, path).toBe(400);
+      expect(JSON.parse(api.calls.at(-1)?.body ?? "{}").origin).toBe("");
+    }
+    for (const method of ["POST", "PUT"])
+      expect((await get(a2("/identify", SO), { cookie: SESSION }, { method })).status).toBe(405);
+  });
+
+  test("identify_redirect_target_is_fixed_path", async () => {
+    const tricks =
+      "&next=%2F%2Fevil.example&redirect_uri=https%3A%2F%2Fevil.example&callback=http%3A%2F%2Fevil.example&path=%2Fx";
+    await expectSeeOther(
+      await get(a2("/identify", SO, tricks), { cookie: SESSION }),
+      `${SO}/checkout/identify?state=${STATE}&code=${CODE}`,
+    );
+    await expectSeeOther(
+      await get(a2("/placement", SO, tricks), { cookie: SESSION }),
+      `${SO}/checkout/placement?state=${STATE}&code=${CODE}`,
+    );
+  });
+
+  test("identify_signs_in_first_and_placement_never_prompts", async () => {
+    const next = `/identify?state=${STATE}&origin=${encodeURIComponent(SO)}`;
+    await expectSeeOther(
+      await get(a2("/identify", SO, "&next=%2F%2Fevil.example")),
+      `/account?next=${encodeURIComponent(next)}`,
+    );
+    const res = await get(a2("/placement", SO));
+    await expectSeeOther(res, `${SO}/checkout/placement?state=${STATE}&code=${CODE}`);
+    expect(api.calls.at(-1)?.headers["x-customer-session"]).toBeUndefined();
   });
 });
 
