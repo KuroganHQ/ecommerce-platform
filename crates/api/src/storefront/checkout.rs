@@ -551,8 +551,6 @@ async fn place_order(
     Ok(no_store(res))
 }
 
-/// WP20: the purchase for the ad platforms, in the placement transaction, only while the
-/// visitor's consent subject grants `ads` (checked again when sending).
 async fn capture_purchase(
     tx: &mut TenantTx,
     headers: &HeaderMap,

@@ -750,9 +750,7 @@ fn conflict(code: &'static str, detail: &str) -> Error {
     }
 }
 
-/// The review step still holds for the cart at `version`: the same cart, both legal consents
-/// and a note within bounds. Returns the trimmed note.
-fn reviewed(version: i32, input: &PlaceOrderInput) -> Result<Option<String>, Error> {
+fn reviewed_notes(version: i32, input: &PlaceOrderInput) -> Result<Option<String>, Error> {
     if version != input.version {
         return Err(conflict(
             "cart_changed",
@@ -785,7 +783,7 @@ pub(crate) async fn check_review(
     cart_id: Uuid,
     input: &PlaceOrderInput,
 ) -> Result<(), Error> {
-    reviewed(state(tx, cart_id).await?.version, input).map(drop)
+    reviewed_notes(state(tx, cart_id).await?.version, input).map(drop)
 }
 
 /// Places the order for the cart behind the checkout capability `token` (A12). `key` is the
@@ -823,7 +821,7 @@ pub async fn place_order(
         ));
     }
     let st = state(tx, cart_ref.id).await?;
-    let notes = reviewed(st.version, input)?;
+    let notes = reviewed_notes(st.version, input)?;
     let note_written = notes.is_some();
 
     // Validation (A3, §10.3 step 1).
