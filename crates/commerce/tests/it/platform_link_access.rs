@@ -1,6 +1,7 @@
 use commerce::capability;
-use commerce::checkout_access::ShopOrigin;
+use commerce::checkout_access::{self, ShopOrigin};
 use commerce::link_access::{self, Scope, Source};
+use commerce::order_access::{self, Access, Credentials};
 use commerce::orders;
 use commerce::tenancy::CheckoutMode;
 use platform::Error;
@@ -10,7 +11,7 @@ use testkit::storefront::{Shop, shop};
 use tokio::sync::oneshot;
 use uuid::Uuid;
 
-use crate::checkout_access::{At, at, attest, blocked_by, pid, switch};
+use crate::checkout_access::{At, at, attest, blocked_by, pid, shop_cart, switch};
 
 impl At {
     async fn exchange(
@@ -490,4 +491,179 @@ async fn grant_ends_when_its_link_is_erased(db: PgPool) {
         not_found(&at.authorize(&runtime, &grant, Scope::OrderRead(a)).await),
         "a grant ends with the email link it came from"
     );
+}
+
+async fn checkout_order(runtime: &PgPool, at: &At, shop: &Shop) -> (Uuid, String, String) {
+    let shop_token = shop_cart(runtime, at, shop).await;
+    let capability = at
+        .run(runtime, async |tx, ctx| {
+            checkout_access::start(tx, ctx, &shop_token, None).await
+        })
+        .await
+        .unwrap();
+    let order =
+        testkit::storefront::raw_order(runtime, shop, shop.cz, "CZK", 10_000, 1, "pending").await;
+    let mut tx = tenant_tx(runtime, shop.tenant).await.unwrap();
+    sqlx::query(
+        "WITH c AS (UPDATE carts SET status = 'converted' WHERE checkout_token_hash = $1
+                    RETURNING id)
+         UPDATE orders SET cart_id = (SELECT id FROM c) WHERE id = $2",
+    )
+    .bind(capability::hash(&capability))
+    .bind(order)
+    .execute(&mut *tx)
+    .await
+    .unwrap();
+    tx.commit().await.unwrap();
+    (order, capability, shop_token)
+}
+
+impl At {
+    async fn access(
+        &self,
+        runtime: &PgPool,
+        order: Uuid,
+        checkout: Option<&str>,
+        grant: Option<&str>,
+    ) -> Result<Access, Error> {
+        self.run(runtime, async |tx, ctx| {
+            order_access::authorize(tx, ctx, order, Credentials { checkout, grant }).await
+        })
+        .await
+    }
+
+    async fn may_pay(&self, runtime: &PgPool, order: Uuid, checkout: &str) -> bool {
+        self.run(runtime, async |tx, ctx| {
+            order_access::may_pay(tx, ctx, order, Some(checkout), None).await
+        })
+        .await
+        .unwrap()
+    }
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn only_the_placing_checkout_pays_and_a_grant_only_reads(db: PgPool) {
+    let runtime = testkit::runtime_pool(&db, 2).await;
+    let (shop, at) = same_origin(&runtime, "oapay").await;
+    let (a, k, _) = checkout_order(&runtime, &at, &shop).await;
+    let (b, b_link) = order(&runtime, &shop).await;
+    let a_link = orders_token(&runtime, &shop, a).await;
+    let (grant, _) = at
+        .exchange(&runtime, Source::OrderLink(&a_link), None)
+        .await
+        .unwrap();
+    let (b_grant, _) = at
+        .exchange(&runtime, Source::OrderLink(&b_link), None)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        at.access(&runtime, a, Some(&k), None).await.unwrap(),
+        Access::Pay
+    );
+    assert!(
+        at.may_pay(&runtime, a, &k).await,
+        "the placing checkout pays"
+    );
+    assert_eq!(
+        at.access(&runtime, a, Some(&k), Some(&grant))
+            .await
+            .unwrap(),
+        Access::Pay
+    );
+    assert_eq!(
+        at.access(&runtime, a, None, Some(&grant)).await.unwrap(),
+        Access::Read,
+        "the grant alone only reads"
+    );
+    assert_eq!(
+        at.access(&runtime, b, Some(&k), Some(&b_grant))
+            .await
+            .unwrap(),
+        Access::Read,
+        "another order's grant reads that order, the checkout does not pay it"
+    );
+    assert!(!at.may_pay(&runtime, b, &k).await);
+    assert!(not_found(
+        &at.access(&runtime, b, Some(&k), Some(&grant)).await
+    ));
+    assert!(not_found(&at.access(&runtime, a, None, None).await));
+    assert!(not_found(
+        &at.access(&runtime, a, Some(&grant), Some(&k)).await
+    ));
+
+    switch(&runtime, &shop, &shop.origin, CheckoutMode::Isolated).await;
+    switch(&runtime, &shop, &shop.origin, CheckoutMode::SameOrigin).await;
+    assert!(
+        not_found(&at.access(&runtime, a, Some(&k), None).await),
+        "a capability of an earlier generation reads nothing"
+    );
+    assert!(!at.may_pay(&runtime, a, &k).await, "nor pays");
+}
+
+async fn queued_behind_a_new_start(
+    db: &PgPool,
+    runtime: &PgPool,
+    at: &At,
+    shop: &Shop,
+    pay: bool,
+) -> Result<bool, Error> {
+    let (a, k, shop_token) = checkout_order(runtime, at, shop).await;
+    assert_eq!(
+        at.access(runtime, a, Some(&k), None).await.unwrap(),
+        Access::Pay
+    );
+    let (mut starting, ctx) = at.tx(runtime).await;
+    checkout_access::start(&mut starting, &ctx, &shop_token, Some(&k))
+        .await
+        .unwrap();
+    let starting_pid = pid(&mut starting).await;
+    let (waiter_pid, waiter_pid_rx) = oneshot::channel();
+    let waiter = tokio::spawn({
+        let (runtime, at) = (runtime.clone(), at.clone());
+        async move {
+            let (mut tx, ctx) = at.tx(&runtime).await;
+            waiter_pid.send(pid(&mut tx).await).unwrap();
+            let r = if pay {
+                order_access::may_pay(&mut tx, &ctx, a, Some(&k), None).await
+            } else {
+                let creds = Credentials {
+                    checkout: Some(&k),
+                    grant: None,
+                };
+                order_access::authorize(&mut tx, &ctx, a, creds)
+                    .await
+                    .map(|access| access == Access::Pay)
+            };
+            tx.commit().await.unwrap();
+            r
+        }
+    });
+    blocked_by(db, waiter_pid_rx.await.unwrap(), starting_pid).await;
+    starting.commit().await.unwrap();
+    waiter.await.unwrap()
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn order_read_or_retry_after_checkout_rotation_denied(db: PgPool) {
+    let runtime = testkit::runtime_pool(&db, 4).await;
+    let (shop, at) = same_origin(&runtime, "oarace").await;
+
+    let read = queued_behind_a_new_start(&db, &runtime, &at, &shop, false).await;
+    assert!(
+        not_found(&read),
+        "a read queued behind the new checkout start fails: {read:?}"
+    );
+    let pay = queued_behind_a_new_start(&db, &runtime, &at, &shop, true).await;
+    assert!(
+        matches!(pay, Ok(false)),
+        "a retry queued behind it may not pay: {pay:?}"
+    );
+}
+
+async fn orders_token(runtime: &PgPool, shop: &Shop, order: Uuid) -> String {
+    let mut tx = tenant_tx(runtime, shop.tenant).await.unwrap();
+    let token = orders::issue_token(&mut tx, order).await.unwrap();
+    tx.commit().await.unwrap();
+    token
 }
