@@ -46,7 +46,7 @@ use crate::media::AssetVariant;
 use crate::notifications::{self, Brand, Rendered, Stored};
 use crate::recommendations::engine::{self, Target, Visitor};
 use crate::recommendations::settings as rec_settings;
-use crate::storefront::{self, Context, PublicUrls, cards, images};
+use crate::storefront::{self, Context, PlatformLink, PlatformLinks, PublicUrls, cards, images};
 
 /// Job kind: one batch of a campaign (`{"campaign_id"}`).
 pub const BATCH_JOB: &str = "marketing.campaign_batch";
@@ -1007,6 +1007,7 @@ pub async fn preview(
         ),
     };
     let ctx = storefront::context(tx, urls, market, Some(&lang), now).await?;
+    let platform = storefront::links(tx, &ctx).await?;
     let (_, content) = pick(&c.content, &lang, &ctx.market.default_locale)
         .ok_or_else(|| invalid(CODE, "the campaign has no content"))?;
     let brand = Brand::load(tx, ctx.base_url.clone()).await?;
@@ -1015,8 +1016,8 @@ pub async fn preview(
     let links = Links {
         track: None,
         click_base: String::new(),
-        unsubscribe_url: ctx.checkout_url("/newsletter"),
-        preferences_url: ctx.checkout_url("/newsletter"),
+        unsubscribe_url: platform.href(PlatformLink::NewsletterPreferences(None)),
+        preferences_url: platform.href(PlatformLink::NewsletterPreferences(None)),
     };
     Renderer {
         ctx: &ctx,
@@ -1241,7 +1242,7 @@ pub async fn run_batch(
 
     let settings = rec_settings::get(&mut tx).await?;
     let assets = load_assets(&mut tx, &c.content).await?;
-    let mut contexts: HashMap<(Uuid, String), Option<(Context, Brand)>> = HashMap::new();
+    let mut contexts: Shops = HashMap::new();
     let (mut sent, mut skipped) = (0, 0);
     for m in &members {
         let reason = match subscribers::may_receive(&mut tx, m.id).await? {
@@ -1324,6 +1325,8 @@ pub async fn run_batch(
     })
 }
 
+type Shops = HashMap<(Uuid, String), Option<(Context, Brand, PlatformLinks)>>;
+
 /// Renders and queues the message of one member (`Err(reason)` = skipped).
 #[allow(clippy::too_many_arguments)]
 async fn send_one(
@@ -1334,7 +1337,7 @@ async fn send_one(
     c: &Loaded,
     settings: &rec_settings::RecommendationSettings,
     assets: &HashMap<Uuid, Vec<AssetVariant>>,
-    contexts: &mut HashMap<(Uuid, String), Option<(Context, Brand)>>,
+    contexts: &mut Shops,
     m: &Member,
 ) -> Result<Result<(), &'static str>, Error> {
     let key = (m.market_id, m.locale.clone());
@@ -1342,7 +1345,8 @@ async fn send_one(
         let loaded = match storefront::context(tx, urls, m.market_id, Some(&m.locale), now).await {
             Ok(ctx) => {
                 let brand = Brand::load(tx, ctx.base_url.clone()).await?;
-                Some((ctx, brand))
+                let platform = storefront::links(tx, &ctx).await?;
+                Some((ctx, brand, platform))
             }
             // A market without a published domain has no shop to link to.
             Err(Error::NotFound | Error::Forbidden { .. }) => None,
@@ -1350,7 +1354,7 @@ async fn send_one(
         };
         contexts.insert(key.clone(), loaded);
     }
-    let Some(Some((ctx, brand))) = contexts.get(&key) else {
+    let Some(Some((ctx, brand, platform))) = contexts.get(&key) else {
         return Ok(Err("no_shop_domain"));
     };
     let Some((lang, content)) = pick(&c.content, &m.locale, &ctx.market.default_locale) else {
@@ -1359,9 +1363,9 @@ async fn send_one(
     let minted = capability::mint();
     let links = Links {
         track: Some((minted.token.clone(), c.link_key.clone())),
-        click_base: ctx.checkout_url("/_p/newsletter/click"),
-        unsubscribe_url: ctx.checkout_url(&format!("/newsletter?t={}", minted.token)),
-        preferences_url: ctx.checkout_url(&format!("/newsletter?t={}", minted.token)),
+        click_base: platform.href(PlatformLink::NewsletterClick),
+        unsubscribe_url: platform.href(PlatformLink::NewsletterPreferences(Some(&minted.token))),
+        preferences_url: platform.href(PlatformLink::NewsletterPreferences(Some(&minted.token))),
     };
     let who = Recipient {
         customer_id: m.customer_id,
@@ -1384,7 +1388,7 @@ async fn send_one(
         }
         Err(e) => return Err(e),
     };
-    let one_click = ctx.checkout_url(&format!("/_p/newsletter/unsubscribe?t={}", minted.token));
+    let one_click = platform.href(PlatformLink::CampaignOneClick(&minted.token));
     let message = notifications::store(
         tx,
         Stored {

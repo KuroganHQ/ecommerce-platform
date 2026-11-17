@@ -15,8 +15,8 @@ use super::images::Image;
 use super::listing::{self, Facet, FacetKind, ListingQuery, PER_PAGE, Sort};
 use super::product::{breadcrumb_ld, category_trail, home_link};
 use super::{
-    Alternate, CacheHints, Context, Link, Search, Seo, alternates, locale_path, messages,
-    plain_excerpt,
+    Alternate, CacheHints, Context, Link, PlatformLink, Search, Seo, alternates, locale_path,
+    messages, plain_excerpt,
 };
 use crate::catalog::{I18n, check_i18n};
 use crate::checkout::i18n_text;
@@ -113,9 +113,12 @@ pub struct ShopModel {
     pub base_path: String,
     /// Locales of this market, the default first, each with its home page URL.
     pub locales: Vec<Alternate>,
-    /// The checkout origin (`https://checkout.<shop host>`, A1): account, order status and the
-    /// withdrawal form (`/withdraw`, A19) live there, not on the theme's origin.
+    /// Where the checkout button goes. Same-origin shop: the C10 start
+    /// (`https://<shop>/_p/checkout/start`, a form POST). Isolated shop: the checkout origin
+    /// (`https://checkout.<shop host>`, A1).
     pub checkout_url: String,
+    /// The public withdrawal form (`/withdraw`, A19) of the shop's checkout mode.
+    pub withdrawal_url: String,
     /// The market's account origin (`https://<label>.<account domain>`, A1): sign-in and the
     /// customer account.
     pub account_url: String,
@@ -247,12 +250,14 @@ pub async fn shop(
         })
         .filter(|m| !m.label.is_empty())
         .collect();
+    let links = super::links(tx, ctx).await?;
     Ok(ShopModel {
         name: ctx.shop_name.clone(),
         locale: ctx.locale.clone(),
         currency: ctx.market.currency.code().into(),
         base_path: ctx.base_path(),
-        checkout_url: ctx.base_url.replacen("://", "://checkout.", 1),
+        checkout_url: links.href(PlatformLink::CheckoutEntry),
+        withdrawal_url: links.href(PlatformLink::WithdrawalForm),
         account_url: ctx.account_url(""),
         locales: ctx
             .market
@@ -274,7 +279,7 @@ pub async fn shop(
             ],
             policy_url: cookies_page.unwrap_or_else(|| ctx.path("/pages/cookies")),
             text_version: crate::consent::TEXT_VERSION.into(),
-            preferences_url: ctx.checkout_url("/consent"),
+            preferences_url: links.href(PlatformLink::Consent),
         },
         free_shipping_threshold: crate::shipping::lowest_free_threshold(tx, ctx.market.id)
             .await?

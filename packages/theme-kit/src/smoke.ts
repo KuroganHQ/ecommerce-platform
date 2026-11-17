@@ -40,14 +40,15 @@ const context = await browser.newContext({
 await addCookie(context, base, cookie);
 const page = await context.newPage();
 const errors: string[] = [];
-// On a preview the checkout handoff lands on the edge's plain notice page (same origin, no
-// view-transition opt-in), and Chromium reports the skipped cross-document transition.
-const BENIGN = values.preview ? /^Transition was aborted because of invalid state/ : null;
+// The checkout start can land on a same-origin page without the theme's view-transition opt-in
+// (a preview's notice, a same-origin shop's /checkout), and Chromium reports the skipped
+// cross-document transition.
+const BENIGN = /^Transition was aborted because of invalid state/;
 page.on("console", (m) => {
-  if (m.type() === "error" && !BENIGN?.test(m.text())) errors.push(m.text());
+  if (m.type() === "error" && !BENIGN.test(m.text())) errors.push(m.text());
 });
 page.on("pageerror", (e) => {
-  if (!BENIGN?.test(e.message)) errors.push(e.message);
+  if (!BENIGN.test(e.message)) errors.push(e.message);
 });
 
 /** Page-model calls of a fresh render of the current URL (Authorization bypasses the cache). */
@@ -115,16 +116,23 @@ try {
     await page.waitForURL(/\/_p\/checkout\/start$/);
     await expect(page.getByRole("heading", { name: /preview/i })).toBeVisible();
   } else {
-    await page.waitForURL(/\/\/checkout\./);
-    await expect(page.getByRole("heading", { name: /Souhrn|Súhrn|Summary/ })).toBeVisible();
-    // The checkout origin shows the same cart: same total (incl. VAT) and the VAT recap.
-    await expect(page.getByTestId("checkout-total")).toHaveText(before.total.formatted);
-    for (const row of before.vat ?? [])
+    await page.waitForURL((u) => u.hostname.startsWith("checkout.") || u.pathname === "/checkout");
+    if (new URL(page.url()).hostname.startsWith("checkout.")) {
+      await expect(page.getByRole("heading", { name: /Souhrn|Súhrn|Summary/ })).toBeVisible();
+      // The checkout origin shows the same cart: same total (incl. VAT) and the VAT recap.
+      await expect(page.getByTestId("checkout-total")).toHaveText(before.total.formatted);
+      for (const row of before.vat ?? [])
+        await expect(
+          page
+            .locator('aside[aria-labelledby="co-summary"] dt')
+            .filter({ hasText: new RegExp(`${row.rate}\\s*%`) }),
+        ).toBeVisible();
+    } else {
       await expect(
-        page
-          .locator('aside[aria-labelledby="co-summary"] dt')
-          .filter({ hasText: new RegExp(`${row.rate}\\s*%`) }),
+        page.getByRole("heading", { name: /^(Pokladna|Pokladňa|Checkout)$/ }),
       ).toBeVisible();
+      await expect(page.getByText(before.total.formatted, { exact: true })).toBeVisible();
+    }
   }
   await page.screenshot({ path: `${values.shots}/checkout.png` });
   if (errors.length) throw new Error(`console errors:\n${errors.join("\n")}`);

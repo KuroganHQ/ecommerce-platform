@@ -240,6 +240,23 @@ const ACCOUNT_PAGE_RE =
   /^\/account(?:\/(?:addresses|security|verify|consent)|\/orders\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})?$/;
 /** Where the fake pay page may send the customer back to: the order page only. */
 const ORDER_PAGE_RE = /^\/o\/[0-9a-f]{64}$/;
+const LEGACY_CHECKOUT_PAGES = new Map([
+  ["/", "/checkout"],
+  ["/withdraw", "/withdraw"],
+  ["/review", "/review"],
+  ["/restore-cart", "/restore-cart"],
+  ["/consent", "/consent"],
+  ["/newsletter", "/newsletter"],
+  ["/newsletter/confirm", "/newsletter/confirm"],
+  ["/watch/confirm", "/watch/confirm"],
+  ["/watch/unsubscribe", "/watch/unsubscribe"],
+  ["/watch/unsubscribed", "/watch/unsubscribed"],
+  ["/flows/unsubscribe", "/flows/unsubscribe"],
+  ["/flows/unsubscribed", "/flows/unsubscribed"],
+  ["/_p/newsletter/click", "/newsletter/click"],
+  ["/_p/newsletter/unsubscribe", "/newsletter"],
+  ["/_p/flows/unsubscribe", "/flows/unsubscribe"],
+]);
 
 const MAX_JSON_BODY = 16 * 1024;
 /** A review form: 4000 characters of body, URL-encoded (up to 6 bytes per character). */
@@ -2448,6 +2465,30 @@ ${
     return pub;
   }
 
+  function legacyCheckout(
+    site: SameOriginSite,
+    req: Request,
+    url: URL,
+    host: string,
+    port: string,
+  ): Response | Promise<Response> {
+    const p = url.pathname;
+    if (req.method === "POST" && p === "/_p/newsletter/unsubscribe")
+      return newsletterLinks(site, req, url, "unsubscribe", host, port);
+    if (req.method === "POST" && p === "/_p/flows/unsubscribe")
+      return flowLink(site, req, url, host, port);
+    const to = ORDER_PAGE_RE.test(p) ? p : LEGACY_CHECKOUT_PAGES.get(p);
+    if (!to || (req.method !== "GET" && req.method !== "HEAD")) return text(404, "Not found");
+    return new Response(null, {
+      status: 308,
+      headers: {
+        location: `${site.shopOrigin}${to}${url.search}`,
+        "cache-control": "no-store",
+        "referrer-policy": "no-referrer",
+      },
+    });
+  }
+
   async function checkout(
     site: Site,
     req: Request,
@@ -2459,6 +2500,7 @@ ${
     const p = url.pathname;
     const legacy = legacyAccountRedirect(site, url);
     if (legacy) return legacy;
+    if (sameOriginShop(site)) return legacyCheckout(site, req, url, host, port);
     const cartCookie = capabilityCookie(req, CHECKOUT_CART_COOKIE);
     const cart: Record<string, string> = cartCookie ? { "x-cart-token": cartCookie } : {};
     if (p === "/_p/withdraw" || p.startsWith("/_p/withdraw/")) {

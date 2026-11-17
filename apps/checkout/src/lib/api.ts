@@ -102,7 +102,7 @@ export function shopUrl(url: URL): string {
 export function accountLinks(shop: ShopModel | null, url: URL) {
   return {
     shopUrl: shop?.locales.find((l) => l.locale === shop.locale)?.href ?? shopUrl(url),
-    withdrawUrl: shop ? `${shop.checkout_url}/withdraw` : "/withdraw",
+    withdrawUrl: shop?.withdrawal_url ?? "/withdraw",
   };
 }
 

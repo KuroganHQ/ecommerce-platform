@@ -28,6 +28,7 @@ use utoipa::ToSchema;
 use uuid::Uuid;
 
 use crate::money::{Currency, Locale, Money, MoneyView};
+use crate::tenancy::CheckoutMode;
 
 pub use listing::{Listing, ListingQuery, listing};
 
@@ -161,12 +162,96 @@ pub fn checkout_base(shop_base: &str) -> String {
     }
 }
 
-impl Context {
-    /// A URL on the market's checkout origin (A1).
-    pub fn checkout_url(&self, path: &str) -> String {
-        format!("{}{path}", checkout_base(&self.base_url))
-    }
+#[derive(Debug, Clone, Copy)]
+pub enum PlatformLink<'a> {
+    /// The page model's `checkout_url`: the C10 start in same-origin mode, the bare checkout
+    /// origin (today's handoff contract) in isolated mode.
+    CheckoutEntry,
+    Order(&'a str),
+    WithdrawalForm,
+    Withdrawal(&'a str),
+    Review(&'a str),
+    Consent,
+    NewsletterConfirm(&'a str),
+    NewsletterPreferences(Option<&'a str>),
+    NewsletterClick,
+    CampaignOneClick(&'a str),
+    FlowOneClick(&'a str),
+    FlowUnsubscribe(&'a str),
+    RestoreCart(&'a str),
+    WatchConfirm(&'a str),
+    WatchUnsubscribe(&'a str),
+}
 
+/// Where the platform links of one shop origin point: `checkout.<shop>` while it is isolated,
+/// the exact origin itself once it is same-origin (decision Routing, C11).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlatformLinks {
+    base: String,
+    mode: CheckoutMode,
+}
+
+impl PlatformLinks {
+    pub fn href(&self, link: PlatformLink<'_>) -> String {
+        let same = self.mode == CheckoutMode::SameOrigin;
+        let path = match link {
+            PlatformLink::CheckoutEntry if same => "/_p/checkout/start".to_owned(),
+            PlatformLink::CheckoutEntry => String::new(),
+            PlatformLink::Order(t) => format!("/o/{t}"),
+            PlatformLink::WithdrawalForm => "/withdraw".to_owned(),
+            PlatformLink::Withdrawal(t) => format!("/withdraw?t={t}"),
+            PlatformLink::Review(t) => format!("/review?token={t}"),
+            PlatformLink::Consent => "/consent".to_owned(),
+            PlatformLink::NewsletterConfirm(t) => format!("/newsletter/confirm?token={t}"),
+            PlatformLink::NewsletterPreferences(Some(t)) => format!("/newsletter?t={t}"),
+            PlatformLink::NewsletterPreferences(None) => "/newsletter".to_owned(),
+            PlatformLink::NewsletterClick if same => "/newsletter/click".to_owned(),
+            PlatformLink::NewsletterClick => "/_p/newsletter/click".to_owned(),
+            PlatformLink::CampaignOneClick(t) | PlatformLink::FlowOneClick(t) if same => {
+                format!("/_p/unsubscribe/{t}")
+            }
+            PlatformLink::CampaignOneClick(t) => format!("/_p/newsletter/unsubscribe?t={t}"),
+            PlatformLink::FlowOneClick(t) => format!("/_p/flows/unsubscribe?token={t}"),
+            PlatformLink::FlowUnsubscribe(t) => format!("/flows/unsubscribe?token={t}"),
+            PlatformLink::RestoreCart(t) => format!("/restore-cart?token={t}"),
+            PlatformLink::WatchConfirm(t) => format!("/watch/confirm?token={t}"),
+            PlatformLink::WatchUnsubscribe(t) => format!("/watch/unsubscribe?token={t}"),
+        };
+        format!("{}{path}", self.base)
+    }
+}
+
+/// The platform links of `ctx.origin`: the origin the edge served, or the one a background
+/// job's resource was made on. Without one, the market's canonical origin.
+pub async fn links(tx: &mut TenantTx, ctx: &Context) -> Result<PlatformLinks, Error> {
+    let origin = ctx.origin.as_ref().map_or(
+        ctx.base_url.as_str(),
+        crate::checkout_access::ShopOrigin::as_str,
+    );
+    let same_origin = sqlx::query_scalar!(
+        r#"SELECT 1 AS "one!" FROM platform.checkout_origins
+           WHERE origin = $1 AND tenant_id = $2 AND market_id = $3 AND mode = 'same_origin'"#,
+        origin,
+        tx.tenant_id(),
+        ctx.market.id
+    )
+    .fetch_optional(&mut **tx)
+    .await?
+    .is_some();
+    Ok(if same_origin {
+        PlatformLinks {
+            base: origin.to_owned(),
+            mode: CheckoutMode::SameOrigin,
+        }
+    } else {
+        PlatformLinks {
+            base: checkout_base(&ctx.base_url),
+            mode: CheckoutMode::Isolated,
+        }
+    })
+}
+
+impl Context {
     pub fn account_url(&self, path: &str) -> String {
         format!("{}{path}", self.account_base)
     }

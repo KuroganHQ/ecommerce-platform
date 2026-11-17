@@ -754,7 +754,23 @@ describe("only the enumerated form paths reach the API", () => {
 });
 
 describe("the legacy checkout host never hands out an internal capability", () => {
-  test.each(["http://checkout.demo.localhost:8280", "http://checkout.fresh.localhost:8280"])(
+  test("a same-origin shop's checkout host answers 404 without calling the API", async () => {
+    const base = "http://checkout.fresh.localhost:8280";
+    const json = {
+      origin: base,
+      "content-type": "application/json",
+      cookie: "__Host-cart=checkouttoken_000000000001",
+    };
+    api.calls.length = 0;
+    for (const p of ["/_p/checkout/place-order", "/_p/checkout/details"]) {
+      const res = await post(p, "{}", json, { base });
+      expect(res.status, p).toBe(404);
+      expect(res.headers.getSetCookie(), p).toEqual([]);
+    }
+    expect(api.calls).toEqual([]);
+  });
+
+  test.each(["http://checkout.demo.localhost:8280"])(
     "%s strips x-cart-token from place-order and has no details route",
     async (base) => {
       answers[PLACE_ORDER_API] = () =>

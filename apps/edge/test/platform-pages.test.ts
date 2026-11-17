@@ -416,17 +416,21 @@ describe("isolated shops, previews and the checkout origin keep today's answers 
     expect(res.headers.get("x-frame-options")).toBeNull();
   });
 
-  test.each(["checkout.demo.localhost:8280", "checkout.fresh.localhost:8280"])(
-    "%s does not serve the same-origin page and serves /_checkout/ immutable",
-    async (host) => {
+  test.each([
+    ["checkout.demo.localhost:8280", 200],
+    ["checkout.fresh.localhost:8280", 404],
+  ])(
+    "%s does not serve the same-origin page; /_checkout/ answers %i",
+    async (host, assetStatus) => {
       for (const p of ["/checkout", "/checkout/", "/%63heckout"]) {
         const res = await get(`http://${host}${p}`, { ...NAVIGATE, cookie: COOKIE });
         expect(res.status, p).toBe(404);
         expect(await res.text(), p).toBe("Not found");
       }
       const asset = await get(`http://${host}${ASSET}`);
-      expect(asset.status).toBe(200);
-      expect(asset.headers.get("cache-control")).toBe("public, max-age=31536000, immutable");
+      expect(asset.status).toBe(assetStatus);
+      if (assetStatus === 200)
+        expect(asset.headers.get("cache-control")).toBe("public, max-age=31536000, immutable");
     },
   );
 });

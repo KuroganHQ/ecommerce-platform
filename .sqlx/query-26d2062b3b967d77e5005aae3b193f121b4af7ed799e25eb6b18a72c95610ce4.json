@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT c.checkout_origin FROM orders o JOIN carts c ON c.id = o.cart_id WHERE o.id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "checkout_origin",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "carts",
+            "name": "checkout_origin"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "26d2062b3b967d77e5005aae3b193f121b4af7ed799e25eb6b18a72c95610ce4"
+}

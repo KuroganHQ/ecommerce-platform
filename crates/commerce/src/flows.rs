@@ -14,10 +14,11 @@ use uuid::Uuid;
 
 use crate::capability;
 use crate::cart;
+use crate::checkout_access::ShopOrigin;
 use crate::consent::{self, ConsentPurpose, Subject};
 use crate::link_access::{self, Scope};
 use crate::notifications::{self, Brand, Email, Template};
-use crate::storefront::{self, Context, PublicUrls};
+use crate::storefront::{self, Context, PlatformLink, PublicUrls};
 
 pub const EVENT_JOB: &str = "flows.event";
 pub const TICK_JOB: &str = "flows.tick";
@@ -420,7 +421,7 @@ async fn execute_cart(
     config: &FlowConfig,
     now: DateTime<Utc>,
 ) -> Result<(), Error> {
-    let Some(c) = sqlx::query("SELECT market_id,email,locale,status,last_activity_at,customer_id FROM carts WHERE id=$1 FOR UPDATE")
+    let Some(c) = sqlx::query("SELECT market_id,email,locale,status,last_activity_at,customer_id,checkout_origin FROM carts WHERE id=$1 FOR UPDATE")
         .bind(cart_id).fetch_optional(&mut **tx).await? else { return finish(tx,id,"cancelled","cart_missing").await; };
     let status: String = c.try_get("status")?;
     let email: Option<String> = c.try_get("email")?;
@@ -463,7 +464,10 @@ async fn execute_cart(
     }
     let market: Uuid = c.try_get("market_id")?;
     let locale: String = c.try_get("locale")?;
-    let ctx = storefront::context(tx, urls, market, Some(&locale), now).await?;
+    let origin: Option<String> = c.try_get("checkout_origin")?;
+    let mut ctx = storefront::context(tx, urls, market, Some(&locale), now).await?;
+    ctx.origin = origin.as_deref().and_then(ShopOrigin::parse);
+    let links = storefront::links(tx, &ctx).await?;
     let brand = Brand::load(tx, ctx.base_url.clone()).await?;
     let minted = capability::mint();
     sqlx::query("INSERT INTO flow_restore_tokens(tenant_id,token_hash,cart_id,expires_at) VALUES($1,$2,$3,$4)")
@@ -477,11 +481,7 @@ async fn execute_cart(
     } else {
         None
     };
-    let restore = format!(
-        "{}/restore-cart?token={}",
-        storefront::checkout_base(&ctx.base_url),
-        minted.token
-    );
+    let restore = links.href(PlatformLink::RestoreCart(&minted.token));
     let optout = capability::mint();
     sqlx::query("INSERT INTO flow_unsubscribe_tokens(tenant_id,token_hash,email) VALUES($1,$2,$3)")
         .bind(tx.tenant_id())
@@ -489,16 +489,8 @@ async fn execute_cart(
         .bind(&email)
         .execute(&mut **tx)
         .await?;
-    let unsub_url = format!(
-        "{}/flows/unsubscribe?token={}",
-        storefront::checkout_base(&ctx.base_url),
-        optout.token
-    );
-    let unsub_post = format!(
-        "{}/_p/flows/unsubscribe?token={}",
-        storefront::checkout_base(&ctx.base_url),
-        optout.token
-    );
+    let unsub_url = links.href(PlatformLink::FlowUnsubscribe(&optout.token));
+    let unsub_post = links.href(PlatformLink::FlowOneClick(&optout.token));
     let message_id = notifications::enqueue(
         tx,
         &brand,
@@ -749,11 +741,13 @@ async fn execute_review(
     }
     let market: Uuid = o.try_get("market_id")?;
     let locale: String = o.try_get("locale")?;
-    let ctx = storefront::context(tx, urls, market, Some(&locale), now).await?;
+    let mut ctx = storefront::context(tx, urls, market, Some(&locale), now).await?;
+    ctx.origin = crate::orders::origin(tx, order_id).await?;
+    let links = storefront::links(tx, &ctx).await?;
     let brand = Brand::load(tx, ctx.base_url.clone()).await?;
     let tokens = crate::reviews::issue_tokens(tx, order_id, now).await?;
     for token in tokens {
-        let url = crate::reviews::review_url(&ctx, &token.token);
+        let url = links.href(PlatformLink::Review(&token.token));
         notifications::enqueue(
             tx,
             &brand,
@@ -832,16 +826,17 @@ pub async fn subscribe_watch_with_ip(
     sqlx::query("SAVEPOINT watch_subscription")
         .execute(&mut **tx)
         .await?;
-    let watch_id: Option<Uuid> = sqlx::query_scalar("INSERT INTO flow_watches(tenant_id,market_id,variant_id,kind,target_minor,email,locale,confirm_hash,unsubscribe_hash,confirm_expires_at)
-        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,now()+interval '48 hours')
+    let watch_id: Option<Uuid> = sqlx::query_scalar("INSERT INTO flow_watches(tenant_id,market_id,variant_id,kind,target_minor,email,locale,confirm_hash,unsubscribe_hash,confirm_expires_at,origin)
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,now()+interval '48 hours',$10)
         ON CONFLICT(tenant_id,market_id,variant_id,kind,email) DO UPDATE SET
-          target_minor=excluded.target_minor,status='pending',confirm_hash=excluded.confirm_hash,
+          target_minor=excluded.target_minor,status='pending',confirm_hash=excluded.confirm_hash,origin=excluded.origin,
           unsubscribe_hash=excluded.unsubscribe_hash,confirm_expires_at=excluded.confirm_expires_at,
           generation=flow_watches.generation+1,updated_at=now() WHERE flow_watches.status='unsubscribed'
             OR (flow_watches.status='pending' AND flow_watches.updated_at < now()-interval '10 minutes')
         RETURNING id")
         .bind(tx.tenant_id()).bind(ctx.market.id).bind(input.variant_id).bind(&input.kind)
         .bind(input.target_minor).bind(&email).bind(&ctx.locale).bind(&confirm.hash).bind(&unsub.hash)
+        .bind(ctx.origin.as_ref().map(ShopOrigin::as_str))
         .fetch_optional(&mut **tx).await?;
     if let Some(watch_id) = watch_id {
         let ip = ip_hash.map(hex::encode).unwrap_or_else(|| "missing".into());
@@ -857,11 +852,9 @@ pub async fn subscribe_watch_with_ip(
             return Ok(());
         }
         let brand = Brand::load(tx, ctx.base_url.clone()).await?;
-        let url = format!(
-            "{}/watch/confirm?token={}",
-            storefront::checkout_base(&ctx.base_url),
-            confirm.token
-        );
+        let url = storefront::links(tx, ctx)
+            .await?
+            .href(PlatformLink::WatchConfirm(&confirm.token));
         notifications::enqueue(
             tx,
             &brand,
@@ -1046,7 +1039,7 @@ pub async fn watch_event(
         .and_then(|v| v.as_str())
         .and_then(|s| Uuid::parse_str(s).ok());
     let rows = sqlx::query(
-        "SELECT w.id,w.market_id,w.email,w.locale,w.target_minor,w.generation
+        "SELECT w.id,w.market_id,w.email,w.locale,w.target_minor,w.generation,w.origin
         FROM flow_watches w JOIN markets m ON m.id=w.market_id
         WHERE w.variant_id=$1 AND w.kind=$2 AND w.status='confirmed'
           AND ($3::uuid IS NULL OR w.id>$3)
@@ -1080,7 +1073,9 @@ pub async fn watch_event(
         let market: Uuid = row.try_get("market_id")?;
         let locale: String = row.try_get("locale")?;
         let email: String = row.try_get("email")?;
-        let ctx = storefront::context(tx, urls, market, Some(&locale), now).await?;
+        let origin: Option<String> = row.try_get("origin")?;
+        let mut ctx = storefront::context(tx, urls, market, Some(&locale), now).await?;
+        ctx.origin = origin.as_deref().and_then(ShopOrigin::parse);
         if watch_kind == "back_in_stock" {
             if crate::inventory::get(tx, variant).await?.available <= 0 {
                 continue;
@@ -1111,11 +1106,9 @@ pub async fn watch_event(
         let unsub = capability::mint();
         sqlx::query("UPDATE flow_watches SET unsubscribe_hash=$2,status='fired',fired_at=$3,updated_at=now() WHERE id=$1 AND status='confirmed'")
             .bind(id).bind(&unsub.hash).bind(now).execute(&mut **tx).await?;
-        let unsubscribe_url = format!(
-            "{}/watch/unsubscribe?token={}",
-            storefront::checkout_base(&ctx.base_url),
-            unsub.token
-        );
+        let unsubscribe_url = storefront::links(tx, &ctx)
+            .await?
+            .href(PlatformLink::WatchUnsubscribe(&unsub.token));
         let message_id = notifications::enqueue(
             tx,
             &brand,
