@@ -41,6 +41,7 @@ import {
   workerResponseHeaders,
 } from "./headers.ts";
 import {
+  CLEAR_GRANT_COOKIE,
   cleanUrl,
   grantCookie,
   isOrderPage,
@@ -1790,6 +1791,7 @@ ${
     const ingress = linkIngress(url);
     if (ingress) {
       if (req.method !== "GET") return text(405, "Method not allowed", { allow: "GET" });
+      if (ingress.kind === "refuse") return text(404, "Not found");
       return ingress.kind === "exchange"
         ? exchangeLink(site, req, ingress.link)
         : seeOther(ingress.location);
@@ -1825,7 +1827,9 @@ ${
     );
     if (res.status !== 201) {
       await res.body?.cancel().catch(() => undefined);
-      return seeOther(REOPEN_LINK_PATH);
+      const reopen = seeOther(REOPEN_LINK_PATH);
+      if (res.status === 409) reopen.headers.set("set-cookie", CLEAR_GRANT_COOKIE);
+      return reopen;
     }
     const grant = res.headers.get(LINK_GRANT_HEADER);
     const body = (await res.json().catch(() => null)) as { resource?: unknown } | null;

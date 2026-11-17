@@ -47,7 +47,8 @@ pub struct Granted {
 }
 
 /// Exchanges `source` for a new grant and revokes the browser's `previous` grant on this origin.
-/// `previous` is a revocation hint, never authorization. An unknown or expired link is `404`
+/// `previous` is a revocation hint, never authorization, and is replaced at most once: a
+/// concurrent second replacement is `409 link_replaced`. An unknown or expired link is `404`
 /// and revokes nothing; an isolated origin is `409 checkout_mode_changed`.
 pub async fn exchange(
     tx: &mut TenantTx,
@@ -83,10 +84,13 @@ pub async fn exchange(
             Utc::now() + Duration::hours(ANONYMOUS_HOURS),
         ),
     };
-    if let Some(previous) = previous.filter(|t| capability::well_formed(t)) {
+    let replaces = previous
+        .filter(|t| capability::well_formed(t))
+        .map(capability::hash);
+    if let Some(previous) = &replaces {
         sqlx::query!(
             "DELETE FROM link_grants WHERE token_hash = $1 AND origin = $2",
-            capability::hash(previous),
+            previous.as_slice(),
             p.origin
         )
         .execute(&mut **tx)
@@ -94,21 +98,28 @@ pub async fn exchange(
     }
     let minted = capability::mint();
     let (kind, order_id) = scope.columns();
-    sqlx::query!(
-        "INSERT INTO link_grants
-             (token_hash, tenant_id, scope, order_id, link_hash, origin, generation, expires_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+    sqlx::query_scalar!(
+        r#"INSERT INTO link_grants (token_hash, tenant_id, scope, order_id, link_hash, replaces,
+                                    origin, generation, expires_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+           ON CONFLICT (tenant_id, replaces) WHERE replaces IS NOT NULL DO NOTHING
+           RETURNING 1 AS "one!""#,
         minted.hash,
         tx.tenant_id(),
         kind,
         order_id,
         link_hash,
+        replaces.as_ref().map(|h| h.as_slice()),
         p.origin,
         p.generation,
         expires_at
     )
-    .execute(&mut **tx)
-    .await?;
+    .fetch_optional(&mut **tx)
+    .await?
+    .ok_or_else(|| Error::Conflict {
+        code: "link_replaced",
+        detail: "another tab replaced this grant; open the link again".into(),
+    })?;
     Ok(Granted {
         token: minted.token,
         scope,

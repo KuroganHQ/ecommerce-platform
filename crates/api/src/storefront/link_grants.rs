@@ -80,7 +80,7 @@ fn grant(headers: &HeaderMap) -> Result<&str, Error> {
     responses(
         (status = 201, body = Exchanged, headers(("X-Link-Grant" = String, description = "The new grant"))),
         (status = 404, description = "unknown or expired link", body = platform::Problem, content_type = "application/problem+json"),
-        (status = 409, description = "checkout_mode_changed", body = platform::Problem, content_type = "application/problem+json"),
+        (status = 409, description = "checkout_mode_changed | link_replaced", body = platform::Problem, content_type = "application/problem+json"),
     )
 )]
 async fn exchange(

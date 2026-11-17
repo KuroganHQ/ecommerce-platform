@@ -20043,7 +20043,7 @@
             }
           },
           "409": {
-            "description": "checkout_mode_changed",
+            "description": "checkout_mode_changed | link_replaced",
             "content": {
               "application/problem+json": {
                 "schema": {

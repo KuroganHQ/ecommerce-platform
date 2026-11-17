@@ -1,3 +1,5 @@
+import { platformSegment } from "@platform/theme-kit";
+
 export const LINK_GRANT_COOKIE = "__Host-Http-cap";
 export const LINK_GRANT_HEADER = "x-link-grant";
 export const REOPEN_LINK_PATH = "/o";
@@ -19,7 +21,15 @@ const ORDER_LINK = /^\/o\/([0-9a-f]{64})$/;
 const ORDER_PAGE = /^\/o\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 export type Link = { kind: "order"; token: string };
-export type LinkIngress = { kind: "exchange"; link: Link } | { kind: "redirect"; location: string };
+export type LinkIngress =
+  | { kind: "exchange"; link: Link }
+  | { kind: "redirect"; location: string }
+  | { kind: "refuse" };
+
+const CANONICAL_PATH = /^(?:\/[a-z0-9-]+)+$/;
+
+const isCanonicalPlatformPath = (pathname: string) =>
+  CANONICAL_PATH.test(pathname) && pathname.startsWith(`/${platformSegment(pathname)}`);
 
 const isSecret = (name: string) => SECRET_PARAMETERS.has(name.toLowerCase());
 
@@ -34,6 +44,7 @@ export function linkIngress(url: URL): LinkIngress | null {
       : { kind: "redirect", location: REOPEN_LINK_PATH };
   }
   if (!secrets) return null;
+  if (!isCanonicalPlatformPath(url.pathname)) return { kind: "refuse" };
   const kept = new URLSearchParams([...url.searchParams].filter(([name]) => !isSecret(name)));
   const query = kept.toString();
   return { kind: "redirect", location: query ? `${url.pathname}?${query}` : url.pathname };
@@ -47,7 +58,9 @@ export function cleanUrl(resource: unknown): string | null {
 }
 
 export const grantCookie = (grant: string) =>
-  `${LINK_GRANT_COOKIE}=${grant}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=1800`;
+  `${LINK_GRANT_COOKIE}=${grant}; Path=/; HttpOnly; Secure; SameSite=Lax`;
+
+export const CLEAR_GRANT_COOKIE = `${LINK_GRANT_COOKIE}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`;
 
 export const REOPEN_LINK_PAGE = `<!doctype html><html lang="cs"><meta charset="utf-8"><meta name="robots" content="noindex">
 <title>Odkaz už neplatí</title>

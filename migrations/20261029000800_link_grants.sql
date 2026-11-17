@@ -6,6 +6,7 @@ CREATE TABLE link_grants (
     scope            text NOT NULL CHECK (scope IN ('order_read', 'withdrawal_request')),
     order_id         uuid,
     link_hash        bytea,
+    replaces         bytea CHECK (length(replaces) = 32),
     origin           text NOT NULL CHECK (length(origin) <= 300),
     generation       bigint NOT NULL CHECK (generation >= 0),
     last_activity_at timestamptz NOT NULL DEFAULT now(),
@@ -18,6 +19,8 @@ CREATE TABLE link_grants (
     CHECK ((scope = 'order_read') = (link_hash IS NOT NULL))
 );
 CREATE INDEX link_grants_link ON link_grants (tenant_id, link_hash) WHERE link_hash IS NOT NULL;
+CREATE UNIQUE INDEX link_grants_replaces ON link_grants (tenant_id, replaces)
+    WHERE replaces IS NOT NULL;
 
 ALTER TABLE link_grants ENABLE ROW LEVEL SECURITY;
 ALTER TABLE link_grants FORCE ROW LEVEL SECURITY;

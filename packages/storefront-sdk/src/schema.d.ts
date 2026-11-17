@@ -4712,7 +4712,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description checkout_mode_changed */
+            /** @description checkout_mode_changed | link_replaced */
             409: {
                 headers: {
                     [name: string]: unknown;

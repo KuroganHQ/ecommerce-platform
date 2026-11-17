@@ -14,6 +14,7 @@ import {
   ORDER_ID,
   ORDER_LINK,
   platformCheckoutWorker,
+  REPLACED_LINK,
   site,
 } from "./fixtures.ts";
 
@@ -131,9 +132,10 @@ describe("an emailed order link becomes a grant cookie on a clean URL (C5)", () 
     });
     expect(res.status).toBe(303);
     expect(res.headers.get("location")).toBe(`/o/${ORDER_ID}`);
-    expect(res.headers.getSetCookie()).toEqual([
-      `__Host-Http-cap=${LINK_GRANT}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=1800`,
-    ]);
+    expect(
+      res.headers.getSetCookie(),
+      "a session cookie: the server's 30-minute idle expiry is the only clock",
+    ).toEqual([`__Host-Http-cap=${LINK_GRANT}; Path=/; HttpOnly; Secure; SameSite=Lax`]);
     expect(res.headers.get("cache-control")).toBe("no-store");
     expect(res.headers.get("referrer-policy")).toBe("strict-origin");
     expectNoSecret(res, await res.text(), "exchange response");
@@ -192,6 +194,18 @@ describe("an emailed order link becomes a grant cookie on a clean URL (C5)", () 
     }
   });
 
+  test("a replacement that lost a race clears the grant cookie and shows the reopen page", async () => {
+    const res = await get(`${FRESH}/o/${REPLACED_LINK}`, {
+      ...NAVIGATE,
+      cookie: `__Host-Http-cap=${OLD_GRANT}`,
+    });
+    expect(res.status).toBe(303);
+    expect(res.headers.get("location")).toBe("/o");
+    expect(res.headers.getSetCookie()).toEqual([
+      "__Host-Http-cap=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0",
+    ]);
+  });
+
   test.each([
     ["short", `/o/${ORDER_LINK.slice(1)}`],
     ["long", `/o/${ORDER_LINK}0`],
@@ -238,6 +252,37 @@ describe("every C5 parameter is stripped before a platform page renders", () => 
   test("a parameter name matches exactly and in any case", async () => {
     const res = await get(`${FRESH}/checkout?Token=${SECRET}&tokens=1`, NAVIGATE);
     expect(res.headers.get("location")).toBe("/checkout?tokens=1");
+  });
+});
+
+describe("no request path reaches Location", () => {
+  test.each([
+    `//checkout%2f@attacker.example?token=${SECRET}`,
+    `//attacker.example/%252e%252e/checkout?token=${SECRET}`,
+    `//attacker.example/checkout?client_secret=${SECRET}`,
+    `/checkout%2f%2fattacker.example?t=${SECRET}`,
+    `/checkout%5c%5cattacker.example?t=${SECRET}`,
+    `/%2e%2e/checkout?code=${SECRET}`,
+    `/checkout/%2e%2e//attacker.example?token=${SECRET}`,
+    `/checkout/..//attacker.example?token=${SECRET}`,
+    `/\\attacker.example/checkout?token=${SECRET}`,
+    `/o/x/..//attacker.example?token=${SECRET}`,
+    `/checkout@attacker.example?token=${SECRET}`,
+    `/CHECKOUT?token=${SECRET}`,
+    `/cs/checkout?token=${SECRET}`,
+  ])("%s", async (raw) => {
+    const res = await gw.fetch(
+      new Request(`${FRESH}${raw}`, { headers: { host: "fresh.localhost:8280", ...NAVIGATE } }),
+    );
+    const location = res.headers.get("location");
+    if (location !== null) {
+      expect(location, "a same-origin path").toMatch(/^\/(?![/\\])/);
+      expect(new URL(location, FRESH).origin).toBe(FRESH);
+      expect(["/checkout", "/o"], "a canonical platform route").toContain(
+        new URL(location, FRESH).pathname,
+      );
+    }
+    expectNoSecret(res, await res.text(), raw);
   });
 });
 
