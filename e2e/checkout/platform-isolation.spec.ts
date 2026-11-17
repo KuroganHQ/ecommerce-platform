@@ -8,6 +8,8 @@ import {
 } from "@playwright/test";
 import { sql } from "../admin/support";
 import {
+  CZ_HTTPS,
+  checkoutOf,
   checkoutReady,
   choosePickupPoint,
   cookieValue,
@@ -376,4 +378,117 @@ test("Chromium speculation and prefetch never fetch platform HTML", async ({
   });
   expect((await prefetched).status()).toBe(403);
   await page.context().close();
+});
+
+const PLATFORM_PAGES = [
+  "/checkout",
+  "/consent",
+  "/withdraw",
+  "/review",
+  "/restore-cart",
+  "/newsletter",
+  "/newsletter/confirm",
+  "/watch/confirm",
+  "/watch/unsubscribe",
+  "/watch/unsubscribed",
+  "/flows/unsubscribe",
+  "/flows/unsubscribed",
+];
+const ISOLATED_CHECKOUT_PAGES = [
+  "/",
+  "/consent",
+  "/withdraw",
+  "/review",
+  "/restore-cart",
+  "/newsletter",
+  "/newsletter/confirm",
+  "/watch/confirm",
+  "/watch/unsubscribed",
+  "/flows/unsubscribed",
+];
+
+function expectPlatformPage(headers: Record<string, string>, label: string) {
+  expect(headers["cache-control"], label).toBe("no-store");
+  expect(headers["x-frame-options"], label).toBe("DENY");
+  expect(headers["cross-origin-opener-policy"], label).toBe("same-origin");
+  expect(headers["content-security-policy"], label).toContain("frame-ancestors 'none'");
+  expect(headers["content-security-policy"], label).toContain("worker-src 'none'");
+}
+
+test("every platform page serves on the same-origin shop and nowhere a theme can fetch it", async ({
+  browser,
+}) => {
+  const context = await securityContext(browser);
+  const page = await context.newPage();
+  for (const path of PLATFORM_PAGES) {
+    const res = await page.goto(`${FRESH_HTTPS}${path}`);
+    expect(res?.status(), path).toBe(200);
+    expectPlatformPage(res?.headers() ?? {}, path);
+  }
+  const reopen = await page.goto(`${FRESH_HTTPS}/o`);
+  expect(reopen?.status(), "the reopen-link page").toBe(404);
+  expectPlatformPage(reopen?.headers() ?? {}, "/o");
+  for (const [callback, error] of [
+    ["/checkout/identify", "identify_failed"],
+    ["/checkout/placement", "placement_failed"],
+  ]) {
+    await page.goto(`${FRESH_HTTPS}${callback}`);
+    expect(page.url(), `${callback} without its parameters fails closed`).toBe(
+      `${FRESH_HTTPS}/checkout?error=${error}`,
+    );
+  }
+
+  const theme = await shopTab(context, `${FRESH_HTTPS}/`);
+  const fetched = await theme.evaluate(
+    (paths) =>
+      Promise.all(
+        paths.map((p) => fetch(p).then(async (r) => `${p} ${r.status} ${(await r.text()).length}`)),
+      ),
+    [...PLATFORM_PAGES, "/o", "/checkout/identify", "/checkout/placement"],
+  );
+  for (const line of fetched) expect(line, "a theme fetch gets an empty 403").toMatch(/ 403 0$/);
+  await context.close();
+});
+
+test("an isolated shop 404s every platform page and its checkout host keeps serving them", async ({
+  browser,
+}) => {
+  const context = await securityContext(browser);
+  const page = await context.newPage();
+  for (const path of [...PLATFORM_PAGES, "/checkout/identify", "/checkout/placement"]) {
+    const res = await page.goto(`${CZ_HTTPS}${path}`);
+    expect(res?.status(), `${CZ_HTTPS}${path}`).toBe(404);
+  }
+  const checkout = checkoutOf(CZ_HTTPS);
+  for (const path of ISOLATED_CHECKOUT_PAGES) {
+    const res = await page.goto(`${checkout}${path}`);
+    expect(res?.status(), `${checkout}${path}`).toBe(200);
+  }
+  await context.close();
+});
+
+test("checkout assets answer only under the current build, on a same-origin shop or an isolated checkout host", async ({
+  browser,
+}) => {
+  const context = await securityContext(browser);
+  const page = await context.newPage();
+  await page.goto(`${FRESH_HTTPS}/consent`);
+  const asset = /\/_checkout\/[0-9a-f]{16}\/[^"]+\.js/.exec(await page.content())?.[0] ?? "";
+  expect(asset).toMatch(/^\/_checkout\/[0-9a-f]{16}\//);
+  const stale = asset.replace(/^\/_checkout\/[0-9a-f]{16}\//, "/_checkout/0000000000000000/");
+  const status = async (url: string, method = "GET") =>
+    (await context.request.fetch(url, { method, maxRedirects: 0 })).status();
+
+  expect(await status(`${FRESH_HTTPS}${asset}`), "same-origin shop").toBe(200);
+  expect(await status(`${checkoutOf(CZ_HTTPS)}${asset}`), "isolated checkout host").toBe(200);
+  expect(await status(`${FRESH_HTTPS}${stale}`), "another build").toBe(404);
+  expect(await status(`${CZ_HTTPS}${asset}`), "isolated shop").toBe(404);
+  expect(await status(`${checkoutOf(FRESH_HTTPS)}${asset}`), "same-origin old host").toBe(404);
+  expect(await status(`${FRESH_HTTPS}${asset}`, "POST"), "a write").toBe(405);
+  const theme = await shopTab(context, `${FRESH_HTTPS}/`);
+  expect(
+    await theme.evaluate((a) => fetch(a).then((r) => r.status), asset),
+    "assets are not navigation gated",
+  ).toBe(200);
+  await context.close();
 });
