@@ -50,7 +50,7 @@ use crate::pricing::cart::{CartInput, ChargeKind, PricedCart, price_cart};
 use crate::promotions::coupons;
 use crate::shipping::{self, Carrier, ShippingMethod};
 use crate::staff::normalize_email;
-use crate::storefront::{Context, messages};
+use crate::storefront::{self, Context, PlatformLink, messages};
 use crate::tax;
 use crate::tenancy::CheckoutMode;
 
@@ -1265,8 +1265,9 @@ async fn send_confirmation(
                 a.name, a.street, a.postal_code, a.city, a.country
             )
         });
+    let links = storefront::links(tx, ctx).await?;
     let vars = json!({
-        "order": order_vars(o, ctx.checkout_url(&format!("/o/{token}"))),
+        "order": order_vars(o, links.href(PlatformLink::Order(token))),
         "vat": o.vat.iter().map(|r| json!({
             "rate": r.rate, "net": r.net.formatted, "vat": r.vat.formatted,
         })).collect::<Vec<_>>(),
@@ -1320,8 +1321,10 @@ pub async fn send_payment_reminders(
         let market = sqlx::query_scalar!("SELECT market_id FROM orders WHERE id = $1", order_id)
             .fetch_one(&mut *tx)
             .await?;
-        let ctx =
-            crate::storefront::context(&mut tx, urls, market, Some(&o.locale), Utc::now()).await?;
+        let mut ctx =
+            storefront::context(&mut tx, urls, market, Some(&o.locale), Utc::now()).await?;
+        ctx.origin = orders::origin(&mut tx, order_id).await?;
+        let links = storefront::links(&mut tx, &ctx).await?;
         let token = orders::issue_token(&mut tx, order_id).await?;
         let brand = Brand::load(&mut tx, ctx.base_url.clone()).await?;
         notifications::enqueue(
@@ -1333,7 +1336,7 @@ pub async fn send_payment_reminders(
                 to: &o.email,
                 locale: &o.locale,
                 vars: json!({
-                    "order": order_vars(&o, ctx.checkout_url(&format!("/o/{token}"))),
+                    "order": order_vars(&o, links.href(PlatformLink::Order(&token))),
                     "bank": bank_vars(&o),
                     "reminder": n,
                 }),

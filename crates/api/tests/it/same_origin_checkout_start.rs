@@ -18,6 +18,7 @@ mod link_grants;
 mod marketing_links;
 mod pii_rotation;
 mod placement_recovery;
+mod platform_links;
 
 #[derive(Clone)]
 struct Edge {

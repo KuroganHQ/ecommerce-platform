@@ -198,11 +198,6 @@ pub async fn issue_tokens(
     Ok(out)
 }
 
-/// The review form on the checkout origin for a token.
-pub fn review_url(ctx: &Context, token: &str) -> String {
-    ctx.checkout_url(&format!("/review?token={token}"))
-}
-
 /// What the review form shows for a token (a read, no change).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, ToSchema)]
 pub struct ReviewInvitation {

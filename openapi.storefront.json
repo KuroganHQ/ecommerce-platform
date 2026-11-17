@@ -12887,6 +12887,7 @@
           "base_path",
           "locales",
           "checkout_url",
+          "withdrawal_url",
           "account_url",
           "currencies",
           "markets",
@@ -12913,7 +12914,7 @@
           },
           "checkout_url": {
             "type": "string",
-            "description": "The checkout origin (`https://checkout.<shop host>`, A1): account, order status and the\nwithdrawal form (`/withdraw`, A19) live there, not on the theme's origin."
+            "description": "Where the checkout button goes. Same-origin shop: the C10 start\n(`https://<shop>/_p/checkout/start`, a form POST). Isolated shop: the checkout origin\n(`https://checkout.<shop host>`, A1)."
           },
           "consent": {
             "$ref": "#/components/schemas/ConsentConfig"
@@ -12990,6 +12991,10 @@
           },
           "trust": {
             "$ref": "#/components/schemas/Trust"
+          },
+          "withdrawal_url": {
+            "type": "string",
+            "description": "The public withdrawal form (`/withdraw`, A19) of the shop's checkout mode."
           }
         }
       },

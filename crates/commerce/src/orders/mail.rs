@@ -12,7 +12,7 @@ use uuid::Uuid;
 
 use crate::checkout::order_vars;
 use crate::notifications::{self, AttachmentRef, Brand, Email, Template};
-use crate::storefront::{self, PublicUrls};
+use crate::storefront::{self, PlatformLink, PublicUrls};
 
 /// Enqueues `template` for the order (idempotent per `key`).
 pub async fn send(
@@ -28,11 +28,13 @@ pub async fn send(
     let market = sqlx::query_scalar!("SELECT market_id FROM orders WHERE id = $1", order_id)
         .fetch_one(&mut **tx)
         .await?;
-    let ctx = storefront::context(tx, urls, market, Some(&o.locale), Utc::now()).await?;
+    let mut ctx = storefront::context(tx, urls, market, Some(&o.locale), Utc::now()).await?;
+    ctx.origin = super::origin(tx, order_id).await?;
+    let links = storefront::links(tx, &ctx).await?;
     let token = super::issue_token(tx, order_id).await?;
     let mut vars = json!({
-        "order": order_vars(&o, ctx.checkout_url(&format!("/o/{token}"))),
-        "withdraw_url": ctx.checkout_url("/withdraw"),
+        "order": order_vars(&o, links.href(PlatformLink::Order(&token))),
+        "withdraw_url": links.href(PlatformLink::WithdrawalForm),
     });
     if let (Value::Object(v), Value::Object(e)) = (&mut vars, extra) {
         v.extend(e);

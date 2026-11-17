@@ -21,7 +21,7 @@ use crate::consent::{self, ConsentPurpose, Subject};
 use crate::link_access::{self, Scope};
 use crate::markets::invalid;
 use crate::notifications::{self, Brand, Email, Template};
-use crate::storefront::Context;
+use crate::storefront::{self, Context, PlatformLink};
 
 /// How long a confirmation link works.
 pub const CONFIRM_HOURS: i64 = 48;
@@ -214,6 +214,7 @@ pub async fn subscribe(
         .execute(&mut **tx)
         .await?;
     }
+    let links = storefront::links(tx, ctx).await?;
     let brand = Brand::load(tx, ctx.base_url.clone()).await?;
     notifications::enqueue(
         tx,
@@ -224,7 +225,7 @@ pub async fn subscribe(
             to: &email,
             locale: &ctx.locale,
             vars: json!({
-                "url": ctx.checkout_url(&format!("/newsletter/confirm?token={}", minted.token)),
+                "url": links.href(PlatformLink::NewsletterConfirm(&minted.token)),
                 "hours": CONFIRM_HOURS,
             }),
             idempotency_key: format!("newsletter_confirm:{}", hex::encode(&minted.hash)),

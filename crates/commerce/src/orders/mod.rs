@@ -65,6 +65,21 @@ pub async fn event(
     Ok(())
 }
 
+/// The exact shop origin the order's checkout was bound to; `None` for orders placed before
+/// checkouts recorded it.
+pub async fn origin(
+    tx: &mut TenantTx,
+    order_id: Uuid,
+) -> Result<Option<crate::checkout_access::ShopOrigin>, Error> {
+    let origin = sqlx::query_scalar!(
+        "SELECT c.checkout_origin FROM orders o JOIN carts c ON c.id = o.cart_id WHERE o.id = $1",
+        order_id
+    )
+    .fetch_one(&mut **tx)
+    .await?;
+    Ok(origin.as_deref().and_then(crate::checkout_access::ShopOrigin::parse))
+}
+
 /// Mints a read-only capability for `/o/<token>` (A4).
 pub async fn issue_token(tx: &mut TenantTx, order_id: Uuid) -> Result<String, Error> {
     let minted = capability::mint();

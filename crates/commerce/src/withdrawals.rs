@@ -37,7 +37,7 @@ use crate::orders::{
 };
 use crate::payments::Payments;
 use crate::refunds::{self, RefundInput, RefundOutcome};
-use crate::storefront::{Context, PublicUrls};
+use crate::storefront::{self, Context, PlatformLink, PublicUrls};
 
 /// The statutory withdrawal period and the refund deadline (days).
 pub const PERIOD_DAYS: i64 = 14;
@@ -227,6 +227,7 @@ pub async fn request_link(
     )
     .execute(&mut **tx)
     .await?;
+    let links = storefront::links(tx, ctx).await?;
     let brand = Brand::load(tx, ctx.base_url.clone()).await?;
     notifications::enqueue(
         tx,
@@ -238,7 +239,7 @@ pub async fn request_link(
             locale: &o.locale,
             vars: json!({
                 "number": number.to_string(),
-                "url": ctx.checkout_url(&format!("/withdraw?t={}", minted.token)),
+                "url": links.href(PlatformLink::Withdrawal(&minted.token)),
                 "hours": LINK_HOURS.to_string(),
             }),
             idempotency_key: format!("withdrawal_link:{}", hex::encode(&minted.hash)),

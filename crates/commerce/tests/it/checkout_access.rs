@@ -172,7 +172,7 @@ async fn strip_binding_as_before_migration(runtime: &PgPool, tenant: Uuid, token
     tx.commit().await.unwrap();
 }
 
-async fn alias(runtime: &PgPool, shop: &Shop, host: &str) -> ShopOrigin {
+pub(crate) async fn alias(runtime: &PgPool, shop: &Shop, host: &str) -> ShopOrigin {
     sqlx::query(
         "INSERT INTO platform.domains (hostname, tenant_id, market_id, verified_at)
          VALUES ($1, $2, $3, now())",

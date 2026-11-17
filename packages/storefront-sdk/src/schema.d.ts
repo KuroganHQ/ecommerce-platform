@@ -2857,8 +2857,9 @@ export interface components {
             base_path: string;
             cache: components["schemas"]["CacheHints"];
             /**
-             * @description The checkout origin (`https://checkout.<shop host>`, A1): account, order status and the
-             *     withdrawal form (`/withdraw`, A19) live there, not on the theme's origin.
+             * @description Where the checkout button goes. Same-origin shop: the C10 start
+             *     (`https://<shop>/_p/checkout/start`, a form POST). Isolated shop: the checkout origin
+             *     (`https://checkout.<shop host>`, A1).
              */
             checkout_url: string;
             consent: components["schemas"]["ConsentConfig"];
@@ -2887,6 +2888,8 @@ export interface components {
             tokens?: unknown;
             tracking: components["schemas"]["Tracking"];
             trust: components["schemas"]["Trust"];
+            /** @description The public withdrawal form (`/withdraw`, A19) of the shop's checkout mode. */
+            withdrawal_url: string;
         };
         SignInResult: {
             customer: components["schemas"]["CustomerView"];

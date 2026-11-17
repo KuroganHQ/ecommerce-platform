@@ -1,0 +1,25 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT 1 AS \"one!\" FROM platform.checkout_origins\n           WHERE origin = $1 AND tenant_id = $2 AND market_id = $3 AND mode = 'same_origin'",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "one!",
+        "type_info": "Int4",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "e6966bb8473d9a6f88c00a390aabb39ea5624e784c105e0baae6c7dbe807bc81"
+}
