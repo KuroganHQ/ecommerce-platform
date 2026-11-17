@@ -37,6 +37,8 @@ export function checkoutApi(request: Request) {
     // WP10: the checkout of the handed-off cart, the order page, account orders.
     checkout: () => get<CheckoutView>("/checkout"),
     receipt: () => get<CheckoutReceipt>("/checkout/order"),
+    savedAddresses: async () =>
+      (await get<{ items: Address[] }>("/checkout/saved-addresses"))?.items ?? [],
     order: (token: string) =>
       /^[0-9a-f]{64}$/.test(token)
         ? get<Order>(`/orders/${token}`)

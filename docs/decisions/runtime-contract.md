@@ -162,7 +162,11 @@ cart capability is injected from the `__Host-cart` cookie by the edge, never exp
   no build-specific style hashes are needed. `style-src-attr 'unsafe-inline'` is a deliberate
   trade-off: attribute styles cannot load resources beyond `img-src`.
 - **Checkout CSP:** same base plus `js.stripe.com`, `frame-src` Stripe + `widget.packeta.com`,
-  `connect-src 'self' https://api.stripe.com`, `form-action 'self'`.
+  `connect-src 'self' https://api.stripe.com`, `form-action 'self' <account origin>`. The account
+  origin is present only on same-origin checkout pages (`/checkout`, also when it re-renders a
+  refused form), and it is the configured account origin of the shop's market, so the sign-in
+  form's redirect to it is allowed (same-origin-checkout.md A2). Every other checkout page, and a
+  market with no account origin, has `form-action 'self'`.
 - `Referrer-Policy: strict-origin-when-cross-origin`, `X-Content-Type-Options: nosniff`,
   `Cross-Origin-Opener-Policy: same-origin`, `Permissions-Policy` (payment only on checkout).
 - Static assets carry `Content-Security-Policy: default-src 'none'; …; sandbox`. A theme could

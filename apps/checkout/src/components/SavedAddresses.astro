@@ -1,0 +1,61 @@
+---
+import { t } from "@platform/storefront-sdk/format";
+import type { Address } from "@platform/storefront-sdk/types";
+import { addressLine, regionName } from "../lib/checkout-steps";
+import { Button, headingClass, sectionClass } from "../ui.tsx";
+
+interface Props {
+  m: Record<string, string>;
+  locale: string;
+  countries: readonly string[];
+  pageToken: string;
+  addresses: readonly Address[];
+}
+const { m, locale, countries, pageToken, addresses } = Astro.props;
+const region = regionName(locale);
+const usable = addresses.filter((a) => countries.includes(a.country));
+const fields = (a: Address) =>
+  Object.entries({
+    name: a.name,
+    company: a.company ?? "",
+    street: a.street,
+    city: a.city,
+    postal_code: a.postal_code,
+    country: a.country,
+    phone: a.phone ?? "",
+  }).map(([key, value]) => [`billing_${key}`, value]);
+---
+
+{
+  usable.length > 0 ? (
+    <section aria-labelledby="co-saved" class={sectionClass}>
+      <h2 id="co-saved" class:list={["mb-3", headingClass]}>
+        {t(m, "checkout.saved_addresses")}
+      </h2>
+      <ul class="grid gap-3">
+        {usable.map((a) => (
+          <li>
+            <form
+              method="post"
+              action="/checkout/addresses"
+              data-details
+              class="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border p-3"
+            >
+              <input type="hidden" name="_pt" value={pageToken} />
+              {fields(a).map(([name, value]) => (
+                <input type="hidden" name={name} value={value} />
+              ))}
+              <span class="text-sm [overflow-wrap:anywhere]">{addressLine({ ...a, company: a.company ?? null }, region)}</span>
+              <Button type="submit">{t(m, "checkout.use_address")}</Button>
+            </form>
+          </li>
+        ))}
+      </ul>
+    </section>
+  ) : addresses.length === 0 ? (
+    <form method="post" action="/checkout/identify/start">
+      <input type="hidden" name="_pt" value={pageToken} />
+      <Button type="submit">{t(m, "checkout.have_account")}</Button>
+    </form>
+  ) : null
+}

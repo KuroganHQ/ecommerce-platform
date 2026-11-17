@@ -128,6 +128,12 @@ Only a confirmed placement (4) does.
 
 The callback target is the exact canonical shop origin and path, never a prefix match.
 
+Amendment (SHOP-142): the same-origin checkout page's CSP allows exactly the market's configured
+account origin in `form-action`, because Chromium checks the 303 of the step 1 POST against the
+`form-action` of the page that submitted the form, not against the redirect response's own CSP
+(Firefox 155 does not apply `form-action` to redirects). No wildcard, and no other page or
+directive changes.
+
 ## Controls on `<shop>`
 
 **C1. Navigation-only platform pages.** For every platform page path (§ Routing) the edge

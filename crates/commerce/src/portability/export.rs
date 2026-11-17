@@ -37,6 +37,7 @@ const FETCH: i64 = 1000;
 pub const SKIPPED_TABLES: &[&str] = &[
     "account_codes",
     "checkout_handoffs",
+    "checkout_identities",
     "customer_auth_attempts",
     "customer_magic_links",
     "customer_sessions",
