@@ -14,7 +14,6 @@ const STRIPE_RETURN_PARAMETERS = new Set([
   "client_secret",
 ]);
 const SECRET_PARAMETERS = new Set(["token", "t", "code", ...STRIPE_RETURN_PARAMETERS]);
-export const RETURNED_PARAMETER = "returned";
 
 const ORDER_LINK = /^\/o\/([0-9a-f]{64})$/;
 const ORDER_PAGE = /^\/o\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -46,7 +45,7 @@ export function linkIngress(url: URL): LinkIngress | null {
   if (!isCanonicalPlatformPath(url.pathname)) return { kind: "refuse" };
   const kept = new URLSearchParams([...url.searchParams].filter(([name]) => !isSecret(name)));
   if ([...url.searchParams.keys()].some((name) => STRIPE_RETURN_PARAMETERS.has(name.toLowerCase())))
-    kept.set(RETURNED_PARAMETER, "1");
+    kept.set("returned", "1");
   const query = kept.toString();
   return { kind: "redirect", location: query ? `${url.pathname}?${query}` : url.pathname };
 }

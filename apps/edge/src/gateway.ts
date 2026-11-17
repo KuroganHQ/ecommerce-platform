@@ -914,7 +914,7 @@ export function createGateway(opts: GatewayOptions) {
     from: { host: string; port: string } | SameOriginSite,
   ): Promise<Response> {
     if (!UUID_RE.test(attempt)) return text(404, "Not found");
-    const shop = "shopOrigin" in from && sameOriginShop(from) ? from : null;
+    const shop = "host" in from ? null : from;
     const api = `${opts.apiOrigin}/storefront/v1/checkout/fake-pay/${attempt}`;
     const cart = capabilityCookie(req, shop ? SAME_ORIGIN_CART_COOKIE : CHECKOUT_CART_COOKIE);
     if (shop && !cart)
@@ -925,18 +925,18 @@ export function createGateway(opts: GatewayOptions) {
     const token = shop ? pageToken(opts.pageTokenSecret, shop.shopOrigin, cart) : undefined;
     if (req.method === "POST") {
       let outcome: string | null;
-      if (shop) {
-        const form = await navigationForm(shop, req);
-        if (form instanceof Response) return form;
-        if (!verifyPageToken(opts.pageTokenSecret, shop.shopOrigin, cart, form.get("_pt")))
-          return new Response(null, { status: 403, headers: { "cache-control": "no-store" } });
-        outcome = form.get("outcome");
-      } else {
-        if (!("host" in from) || !sameOrigin(req, from.host, from.port))
+      if ("host" in from) {
+        if (!sameOrigin(req, from.host, from.port))
           return problem(403, "cross_origin", "cross-origin request");
         const raw = await readCapped(req.body, MAX_JSON_BODY).catch(() => null);
         if (!raw) return problem(413, "payload_too_large", `body over ${MAX_JSON_BODY} bytes`);
         outcome = new URLSearchParams(new TextDecoder().decode(raw)).get("outcome");
+      } else {
+        const form = await navigationForm(from, req);
+        if (form instanceof Response) return form;
+        if (!verifyPageToken(opts.pageTokenSecret, from.shopOrigin, cart, form.get("_pt")))
+          return new Response(null, { status: 403, headers: { "cache-control": "no-store" } });
+        outcome = form.get("outcome");
       }
       if (outcome !== "succeeded" && outcome !== "failed")
         return problem(400, "invalid_outcome", "outcome must be succeeded or failed");

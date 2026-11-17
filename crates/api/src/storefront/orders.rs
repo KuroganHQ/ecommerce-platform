@@ -122,16 +122,6 @@ pub(super) async fn authorize(
     }
 }
 
-async fn authorize_payer(
-    tx: &mut TenantTx,
-    ctx: &Context,
-    headers: &HeaderMap,
-    r: &OrderRef,
-) -> Result<Authorized, Error> {
-    let a = authorize(tx, ctx, headers, r).await?;
-    if a.may_pay { Ok(a) } else { Err(not_allowed()) }
-}
-
 /// The order, its payment view narrowed to what this requester may do.
 async fn read(
     tx: &mut TenantTx,
@@ -223,7 +213,10 @@ async fn new_attempt(
 ) -> Result<Response, Error> {
     let r = order_ref(token_path)?;
     let (attempt, page) = with_ctx(&s, &shopper, async |tx, ctx| {
-        let a = authorize_payer(tx, ctx, &headers, &r).await?;
+        let a = authorize(tx, ctx, &headers, &r).await?;
+        if !a.may_pay {
+            return Err(not_allowed());
+        }
         Ok((
             payments::retry(tx, &s.checkout.payments, a.order).await?,
             a.page,
