@@ -5,6 +5,8 @@ use tokio::sync::Mutex;
 use super::*;
 
 pub(super) const OWNER: &str = "owner";
+const HISTORY: &str = "/admin/v1/checkout-origins/history";
+const MODE: &str = "/admin/v1/checkout-origins/mode";
 
 fn jwt(sub: &str, auth_age: i64) -> String {
     let mut claims = claims(sub);
@@ -12,25 +14,29 @@ fn jwt(sub: &str, auth_age: i64) -> String {
     sign(&claims)
 }
 
-impl Ctx {
-    pub(super) async fn admin(&self, call: Call<'_>, sub: &str) -> (StatusCode, Value) {
-        self.admin_on(&self.s, call, sub).await
-    }
+fn mode_of(origin: &Value) -> (&str, i64) {
+    (
+        origin["mode"].as_str().unwrap(),
+        origin["mode_generation"].as_i64().unwrap(),
+    )
+}
 
+impl Ctx {
     async fn admin_on(&self, s: &api::AppState, call: Call<'_>, sub: &str) -> (StatusCode, Value) {
         let token = jwt(sub, 60);
         let (status, body, _) = call.token(&token).tenant(self.shop.tenant).send(s).await;
         (status, body)
     }
 
+    async fn post(&self, path: &str, body: Value) -> (StatusCode, Value) {
+        self.admin_on(&self.s, Call::post(path, body), OWNER).await
+    }
+
     pub(super) async fn attest(&self, origin: &str) -> Value {
         let (status, body) = self
-            .admin(
-                Call::post(
-                    "/admin/v1/checkout-origins/history",
-                    json!({ "origin": origin, "attestation_version": 1 }),
-                ),
-                OWNER,
+            .post(
+                HISTORY,
+                json!({ "origin": origin, "attestation_version": 1 }),
             )
             .await;
         assert_eq!(status, StatusCode::OK, "{body}");
@@ -38,36 +44,25 @@ impl Ctx {
     }
 
     pub(super) async fn set_mode(&self, origin: &str, mode: &str) -> (StatusCode, Value) {
-        self.admin(
-            Call::post(
-                "/admin/v1/checkout-origins/mode",
-                json!({ "origin": origin, "mode": mode }),
-            ),
-            OWNER,
-        )
-        .await
-    }
-
-    async fn origins(&self) -> Vec<Value> {
-        let (status, body) = self
-            .admin(Call::get("/admin/v1/checkout-origins"), OWNER)
-            .await;
-        assert_eq!(status, StatusCode::OK, "{body}");
-        body["items"].as_array().unwrap().clone()
+        self.post(MODE, json!({ "origin": origin, "mode": mode }))
+            .await
     }
 
     pub(super) async fn origin(&self, origin: &str) -> Value {
-        self.origins()
-            .await
-            .into_iter()
+        let (status, body) = self
+            .admin_on(&self.s, Call::get("/admin/v1/checkout-origins"), OWNER)
+            .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        body["items"]
+            .as_array()
+            .unwrap()
+            .iter()
             .find(|o| o["origin"] == origin)
             .unwrap_or_else(|| panic!("{origin} is listed"))
+            .clone()
     }
 
     async fn platform_host(&self, host: &str, complete: bool) -> String {
-        let mut tx = platform::db::tenant_tx(&self.runtime, self.shop.tenant)
-            .await
-            .unwrap();
         sqlx::query(
             "INSERT INTO platform.hostname_claims (hostname, tenant_id, platform_issued, claimed_at)
              VALUES ($1, $2, true, CASE WHEN $3 THEN now() END)",
@@ -75,21 +70,10 @@ impl Ctx {
         .bind(host)
         .bind(self.shop.tenant)
         .bind(complete)
-        .execute(&mut *tx)
+        .execute(&self.runtime)
         .await
         .unwrap();
-        sqlx::query(
-            "INSERT INTO platform.domains (hostname, tenant_id, market_id, is_primary, verified_at)
-             VALUES ($1, $2, $3, false, now())",
-        )
-        .bind(host)
-        .bind(self.shop.tenant)
-        .bind(self.shop.cz)
-        .execute(&mut *tx)
-        .await
-        .unwrap();
-        tx.commit().await.unwrap();
-        format!("https://{host}")
+        self.alias(host).await.origin
     }
 
     pub(super) async fn alias(&self, host: &str) -> Edge {
@@ -158,7 +142,7 @@ impl Ctx {
 
     async fn audit(&self, action: &str) -> Vec<Value> {
         let (status, body) = self
-            .admin(Call::get("/admin/v1/audit-log?limit=100"), OWNER)
+            .admin_on(&self.s, Call::get("/admin/v1/audit-log?limit=100"), OWNER)
             .await;
         assert_eq!(status, StatusCode::OK, "{body}");
         body["items"]
@@ -197,9 +181,8 @@ async fn purge_sink() -> (api::edge::EdgePurge, Arc<Mutex<Vec<Value>>>) {
 async fn attestation_records_actor_time_and_version(db: PgPool) {
     let c = setup(db, CheckoutMode::Isolated).await;
     let origin = c.shop.origin.as_str();
-    let before = c.origin(origin).await;
     assert_eq!(
-        before,
+        c.origin(origin).await,
         json!({ "origin": origin, "mode": "isolated", "mode_generation": 1,
                 "history": "unknown_or_used", "attestation": null })
     );
@@ -216,12 +199,9 @@ async fn attestation_records_actor_time_and_version(db: PgPool) {
         .unwrap();
     assert!(at >= started - chrono::Duration::seconds(5) && at <= Utc::now());
     assert_eq!(
-        (
-            attested["mode"].clone(),
-            attested["mode_generation"].clone()
-        ),
-        (json!("isolated"), json!(1)),
-        "recording the history changes no mode"
+        mode_of(&attested),
+        ("isolated", 1),
+        "history changes no mode"
     );
     assert_eq!(c.origin(origin).await, attested, "the list shows it");
     let audit = c.audit("checkout_origin.history_recorded").await;
@@ -234,101 +214,78 @@ async fn attestation_records_actor_time_and_version(db: PgPool) {
 async fn unknown_or_used_origins_cannot_enable(db: PgPool) {
     let c = setup(db, CheckoutMode::Isolated).await;
     let origin = c.shop.origin.as_str();
-    let (status, body) = c.set_mode(origin, "same_origin").await;
-    assert_eq!(
-        (status, body["code"].as_str()),
-        (StatusCode::CONFLICT, Some("origin_history_unknown")),
-        "{body}"
-    );
-
     let used = c.platform_host("used-platform.localhost", false).await;
-    let (status, body) = c
-        .admin(
-            Call::post(
-                "/admin/v1/checkout-origins/history",
-                json!({ "origin": used }),
-            ),
-            OWNER,
-        )
-        .await;
-    assert_eq!(
-        (status, body["code"].as_str()),
-        (StatusCode::CONFLICT, Some("origin_history_unknown")),
-        "a platform hostname without its full claim: {body}"
-    );
-    let (status, body) = c.set_mode(&used, "same_origin").await;
-    assert_eq!(status, StatusCode::CONFLICT, "{body}");
-
     let fresh = c.platform_host("fresh-platform.localhost", true).await;
-    let (status, body) = c
-        .admin(
-            Call::post(
-                "/admin/v1/checkout-origins/history",
-                json!({ "origin": fresh, "attestation_version": 1 }),
-            ),
-            OWNER,
-        )
-        .await;
-    assert_eq!(
-        (status, body["code"].as_str()),
-        (StatusCode::CONFLICT, Some("platform_hostname")),
-        "a merchant cannot attest a platform hostname: {body}"
-    );
-    let (status, body) = c
-        .admin(
-            Call::post(
-                "/admin/v1/checkout-origins/history",
-                json!({ "origin": fresh }),
-            ),
-            OWNER,
-        )
-        .await;
-    assert_eq!(status, StatusCode::OK, "{body}");
-    assert_eq!(body["history"], "platform_never_reassigned");
-    assert_eq!(body["attestation"], Value::Null);
-
-    for (input, code) in [
-        (json!({ "origin": origin }), "attestation_required"),
+    let other = testkit::storefront::shop(&c.runtime, "other").await;
+    let elsewhere = other.origin.as_str();
+    for (path, input, expected, code) in [
         (
+            MODE,
+            json!({ "origin": origin, "mode": "same_origin" }),
+            StatusCode::CONFLICT,
+            "origin_history_unknown",
+        ),
+        (
+            HISTORY,
+            json!({ "origin": used }),
+            StatusCode::CONFLICT,
+            "origin_history_unknown",
+        ),
+        (
+            MODE,
+            json!({ "origin": used, "mode": "same_origin" }),
+            StatusCode::CONFLICT,
+            "origin_history_unknown",
+        ),
+        (
+            HISTORY,
+            json!({ "origin": fresh, "attestation_version": 1 }),
+            StatusCode::CONFLICT,
+            "platform_hostname",
+        ),
+        (
+            HISTORY,
+            json!({ "origin": origin }),
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "attestation_required",
+        ),
+        (
+            HISTORY,
             json!({ "origin": origin, "attestation_version": 2 }),
+            StatusCode::UNPROCESSABLE_ENTITY,
             "unsupported_attestation_version",
         ),
         (
+            HISTORY,
             json!({ "origin": "https://Shop.localhost" }),
+            StatusCode::UNPROCESSABLE_ENTITY,
             "invalid_origin",
         ),
+        (
+            HISTORY,
+            json!({ "origin": elsewhere, "attestation_version": 1 }),
+            StatusCode::NOT_FOUND,
+            "not_found",
+        ),
+        (
+            MODE,
+            json!({ "origin": elsewhere, "mode": "isolated" }),
+            StatusCode::NOT_FOUND,
+            "not_found",
+        ),
     ] {
-        let (status, body) = c
-            .admin(
-                Call::post("/admin/v1/checkout-origins/history", input.clone()),
-                OWNER,
-            )
-            .await;
+        let (status, body) = c.post(path, input.clone()).await;
         assert_eq!(
             (status, body["code"].as_str()),
-            (StatusCode::UNPROCESSABLE_ENTITY, Some(code)),
-            "{input}: {body}"
+            (expected, Some(code)),
+            "{path} {input}: {body}"
         );
     }
-    let other = testkit::storefront::shop(&c.runtime, "other").await;
-    for call in [
-        Call::post(
-            "/admin/v1/checkout-origins/history",
-            json!({ "origin": other.origin.as_str(), "attestation_version": 1 }),
-        ),
-        Call::post(
-            "/admin/v1/checkout-origins/mode",
-            json!({ "origin": other.origin.as_str(), "mode": "isolated" }),
-        ),
-    ] {
-        let (status, body) = c.admin(call, OWNER).await;
-        assert_eq!(
-            status,
-            StatusCode::NOT_FOUND,
-            "another tenant's origin: {body}"
-        );
-    }
-    assert_eq!(c.origin(origin).await["mode"], "isolated");
+    let (status, body) = c.post(HISTORY, json!({ "origin": fresh })).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["history"], "platform_never_reassigned");
+    assert_eq!(body["attestation"], Value::Null);
+    assert_eq!(mode_of(&c.origin(origin).await), ("isolated", 1));
 }
 
 #[sqlx::test(migrations = "../../migrations")]
@@ -340,12 +297,7 @@ async fn admin_api_rejects_forged_readiness_history_and_unauthorized_actors(db: 
         json!({ "origin": origin, "attestation_version": 1, "attested_by": "someone-else" }),
         json!({ "origin": origin, "attestation_version": 1, "attested_at": "2020-01-01T00:00:00Z" }),
     ] {
-        let (status, body) = c
-            .admin(
-                Call::post("/admin/v1/checkout-origins/history", forged.clone()),
-                OWNER,
-            )
-            .await;
+        let (status, body) = c.post(HISTORY, forged.clone()).await;
         assert_eq!(
             (status, body["code"].as_str()),
             (StatusCode::UNPROCESSABLE_ENTITY, Some("invalid_body")),
@@ -357,67 +309,53 @@ async fn admin_api_rejects_forged_readiness_history_and_unauthorized_actors(db: 
     c.attest(origin).await;
     let mut unready = c.s.clone();
     unready.same_origin_ready = false;
-    let (status, body) = c
-        .admin_on(
-            &unready,
-            Call::post(
-                "/admin/v1/checkout-origins/mode",
-                json!({ "origin": origin, "mode": "same_origin", "ready": true }),
-            ),
-            OWNER,
-        )
-        .await;
-    assert_eq!(
-        (status, body["code"].as_str()),
-        (StatusCode::UNPROCESSABLE_ENTITY, Some("invalid_body")),
-        "a forged readiness claim: {body}"
-    );
-    let (status, body) = c
-        .admin_on(
-            &unready,
-            Call::post(
-                "/admin/v1/checkout-origins/mode",
-                json!({ "origin": origin, "mode": "same_origin" }),
-            ),
-            OWNER,
-        )
-        .await;
-    assert_eq!(
-        (status, body["code"].as_str()),
-        (StatusCode::CONFLICT, Some("checkout_not_ready")),
-        "{body}"
-    );
-    assert_eq!(c.origin(origin).await["mode"], "isolated");
+    for (input, expected, code) in [
+        (
+            json!({ "origin": origin, "mode": "same_origin", "ready": true }),
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_body",
+        ),
+        (
+            json!({ "origin": origin, "mode": "same_origin" }),
+            StatusCode::CONFLICT,
+            "checkout_not_ready",
+        ),
+    ] {
+        let (status, body) = c
+            .admin_on(&unready, Call::post(MODE, input.clone()), OWNER)
+            .await;
+        assert_eq!(
+            (status, body["code"].as_str()),
+            (expected, Some(code)),
+            "{input}: {body}"
+        );
+    }
 
     testkit::staff(&c.runtime, c.shop.tenant, "clerk", "staff").await;
     testkit::staff(&c.runtime, c.shop.tenant, "manager", "admin").await;
     let other = testkit::storefront::shop(&c.runtime, "other").await;
     testkit::staff(&c.runtime, other.tenant, "owner-b", "owner").await;
     let stale = jwt(OWNER, 3600);
-    for path in [
-        "/admin/v1/checkout-origins/history",
-        "/admin/v1/checkout-origins/mode",
+    for (path, input) in [
+        (
+            HISTORY,
+            json!({ "origin": origin, "attestation_version": 1 }),
+        ),
+        (MODE, json!({ "origin": origin, "mode": "same_origin" })),
     ] {
-        let body = json!({ "origin": origin, "attestation_version": 1, "mode": "same_origin" });
-        for (who, expected, code) in [
-            ("clerk", StatusCode::FORBIDDEN, "insufficient_role"),
-            ("manager", StatusCode::FORBIDDEN, "insufficient_role"),
-            ("owner-b", StatusCode::FORBIDDEN, "not_a_member"),
+        for (who, code) in [
+            ("clerk", "insufficient_role"),
+            ("manager", "insufficient_role"),
+            ("owner-b", "not_a_member"),
         ] {
-            let mut input = body.clone();
-            if path.ends_with("history") {
-                input.as_object_mut().unwrap().remove("mode");
-            } else {
-                input.as_object_mut().unwrap().remove("attestation_version");
-            }
-            let (status, problem) = c.admin(Call::post(path, input), who).await;
+            let (status, problem) = c.admin_on(&c.s, Call::post(path, input.clone()), who).await;
             assert_eq!(
                 (status, problem["code"].as_str()),
-                (expected, Some(code)),
+                (StatusCode::FORBIDDEN, Some(code)),
                 "{who} on {path}: {problem}"
             );
         }
-        let (status, problem, _) = Call::post(path, json!({ "origin": origin }))
+        let (status, problem, _) = Call::post(path, input)
             .token(&stale)
             .tenant(c.shop.tenant)
             .send(&c.s)
@@ -429,13 +367,12 @@ async fn admin_api_rejects_forged_readiness_history_and_unauthorized_actors(db: 
         );
     }
     let (status, _) = c
-        .admin(Call::get("/admin/v1/checkout-origins"), "clerk")
+        .admin_on(&c.s, Call::get("/admin/v1/checkout-origins"), "clerk")
         .await;
     assert_eq!(status, StatusCode::FORBIDDEN, "staff cannot list policies");
-    let listed = c.origin(origin).await;
     assert_eq!(
-        (listed["mode"].clone(), listed["mode_generation"].clone()),
-        (json!("isolated"), json!(1)),
+        mode_of(&c.origin(origin).await),
+        ("isolated", 1),
         "nothing switched"
     );
 }
@@ -460,20 +397,13 @@ async fn switch_revokes_the_shop_audits_and_purges(db: PgPool) {
 
     let (status, body) = c.set_mode(&origin, "same_origin").await;
     assert_eq!(status, StatusCode::OK, "{body}");
-    assert_eq!(
-        (body["mode"].clone(), body["mode_generation"].clone()),
-        (json!("same_origin"), json!(2))
-    );
+    assert_eq!(mode_of(&body), ("same_origin", 2));
     assert_eq!(
         purged.lock().await.clone(),
         vec![json!({ "tenant_id": c.shop.tenant })],
         "the edge drops its resolver and page caches of the tenant"
     );
-    assert_eq!(
-        c.checkout_via(&c.edge, &here).await,
-        StatusCode::NOT_FOUND,
-        "revoked"
-    );
+    assert_eq!(c.checkout_via(&c.edge, &here).await, StatusCode::NOT_FOUND);
     assert_eq!(
         c.checkout_via(&alias, &there).await,
         StatusCode::NOT_FOUND,
@@ -486,14 +416,19 @@ async fn switch_revokes_the_shop_audits_and_purges(db: PgPool) {
     );
     let audit = c.audit("checkout_origin.mode_switched").await;
     assert_eq!(audit.len(), 1, "{audit:?}");
-    assert_eq!(audit[0]["actor"], OWNER);
-    assert_eq!(audit[0]["entity_id"], origin);
     assert_eq!(
         (
-            audit[0]["diff"]["from"].clone(),
-            audit[0]["diff"]["to"].clone()
+            &audit[0]["actor"],
+            &audit[0]["entity_id"],
+            &audit[0]["diff"]["from"],
+            &audit[0]["diff"]["to"]
         ),
-        (json!("isolated"), json!("same_origin"))
+        (
+            &json!(OWNER),
+            &json!(origin),
+            &json!("isolated"),
+            &json!("same_origin")
+        )
     );
 
     let shop_token = c.shop_cart().await;
@@ -501,8 +436,9 @@ async fn switch_revokes_the_shop_audits_and_purges(db: PgPool) {
     let (status, again) = c.set_mode(&origin, "same_origin").await;
     assert_eq!(status, StatusCode::OK, "{again}");
     assert_eq!(
-        again["mode_generation"], 2,
-        "switching to the current mode is a no-op"
+        mode_of(&again),
+        ("same_origin", 2),
+        "the current mode is a no-op"
     );
     assert_eq!(
         c.checkout(&k).await.0,
@@ -517,10 +453,7 @@ async fn switch_revokes_the_shop_audits_and_purges(db: PgPool) {
     let (status, back) = c
         .admin_on(
             &unready,
-            Call::post(
-                "/admin/v1/checkout-origins/mode",
-                json!({ "origin": origin, "mode": "isolated" }),
-            ),
+            Call::post(MODE, json!({ "origin": origin, "mode": "isolated" })),
             OWNER,
         )
         .await;
@@ -529,10 +462,7 @@ async fn switch_revokes_the_shop_audits_and_purges(db: PgPool) {
         StatusCode::OK,
         "rollback needs no readiness: {back}"
     );
-    assert_eq!(
-        (back["mode"].clone(), back["mode_generation"].clone()),
-        (json!("isolated"), json!(3))
-    );
+    assert_eq!(mode_of(&back), ("isolated", 3));
     assert_eq!(
         c.checkout(&k).await.0,
         StatusCode::NOT_FOUND,
