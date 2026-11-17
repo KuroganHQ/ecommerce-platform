@@ -121,6 +121,26 @@ describe("draftToInput", () => {
     expect(input.brand).toBeNull();
   });
 
+  it("sends a typed swatch trimmed and leaves a cleared swatch out", () => {
+    const d = emptyDraft();
+    d.options = [
+      {
+        code: "color",
+        name_i18n: { cs: "Barva" },
+        values: [
+          { code: "red", name_i18n: { cs: "Červená" }, swatch: " #C0392B " },
+          { code: "blue", name_i18n: { cs: "Modrá" }, swatch: "" },
+          { code: "green", name_i18n: { cs: "Zelená" }, swatch: null },
+        ],
+      },
+    ];
+    expect(draftToInput(d).options?.[0]?.values).toEqual([
+      { code: "red", name_i18n: { cs: "Červená" }, swatch: "#C0392B" },
+      { code: "blue", name_i18n: { cs: "Modrá" } },
+      { code: "green", name_i18n: { cs: "Zelená" } },
+    ]);
+  });
+
   it("round-trips a product", () => {
     const p: Product = {
       id: "p1",

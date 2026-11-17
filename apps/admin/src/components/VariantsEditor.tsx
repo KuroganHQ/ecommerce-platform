@@ -11,6 +11,7 @@ import {
   type VariantDraft,
   variantMatrix,
 } from "../lib/product-form.ts";
+import { hexOf } from "../lib/themes.ts";
 import { Th, tableClass, tdClass } from "./Page.tsx";
 
 function label(names: Record<string, string>): string {
@@ -48,6 +49,11 @@ function OptionEditor(props: {
     );
     props.onChange({ ...props.option, values });
   };
+  const setSwatch = (vi: number, swatch: string) =>
+    props.onChange({
+      ...props.option,
+      values: props.option.values.map((val, j) => (j === vi ? { ...val, swatch } : val)),
+    });
   const addValue = () => {
     const code = freshCode(
       {},
@@ -85,6 +91,7 @@ function OptionEditor(props: {
               <For each={CONTENT_LOCALES}>
                 {(l) => <Th>{`${t("editor.optionValues")} (${l})`}</Th>}
               </For>
+              <Th>{t("editor.swatch")}</Th>
               <Th>{t("editor.optionCode")}</Th>
               <Th srOnly>{t("common.actions")}</Th>
             </tr>
@@ -106,6 +113,32 @@ function OptionEditor(props: {
                       </td>
                     )}
                   </For>
+                  <td class={`${tdClass} py-1`}>
+                    <div class="flex items-start gap-2">
+                      <input
+                        type="color"
+                        aria-label={`${heading()}: ${t("editor.pickSwatch")} ${vi + 1}`}
+                        value={hexOf(val().swatch ?? "") ?? "#000000"}
+                        onInput={(e) => setSwatch(vi, e.currentTarget.value)}
+                        class="h-control w-10 shrink-0 cursor-pointer rounded-md border border-input bg-control p-0.5 hover:border-input-hover"
+                      />
+                      <TextField
+                        class="w-28"
+                        hideLabel
+                        label={`${heading()}: ${t("editor.swatch")} ${vi + 1}`}
+                        value={val().swatch ?? ""}
+                        onChange={(v) => setSwatch(vi, v)}
+                        placeholder="#rrggbb"
+                        inputClass="figures"
+                        maxLength={7}
+                        error={
+                          (val().swatch ?? "").trim() !== "" &&
+                          !hexOf(val().swatch ?? "") &&
+                          t("editor.invalidSwatch")
+                        }
+                      />
+                    </div>
+                  </td>
                   <td class={`${tdClass} font-mono text-xs text-muted-foreground`}>{val().code}</td>
                   <td class={`${tdClass} w-12 text-right`}>
                     <Button
@@ -146,6 +179,7 @@ export function VariantsEditor(props: {
   options: ProductOption[];
   variants: VariantDraft[];
   skuBase: string;
+  error?: string;
   onOptions: (o: ProductOption[]) => void;
   onVariants: (v: VariantDraft[]) => void;
 }) {
@@ -183,8 +217,8 @@ export function VariantsEditor(props: {
   return (
     <div class="flex flex-col gap-4">
       <p class="text-sm text-muted-foreground">{t("editor.matrixHint")}</p>
-      <Show when={matrixError()}>
-        <Alert tone="error">{matrixError()}</Alert>
+      <Show when={matrixError() ?? props.error}>
+        {(message) => <Alert tone="error">{message()}</Alert>}
       </Show>
       <Index each={props.options}>
         {(o, i) => (

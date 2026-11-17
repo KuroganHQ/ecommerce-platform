@@ -1221,7 +1221,8 @@ export const en = {
     invalid_unit: "Unit and content must be set together (content up to 4 decimals).",
     invalid_variants:
       "Check the variants: an active product needs at least one, SKUs must be unique.",
-    invalid_options: "Every option needs a name and at least one value.",
+    invalid_options:
+      "Every option needs a name and at least one value, and a colour swatch is written as #rrggbb.",
     invalid_weight: "Weights are whole grams (0 to 10,000,000).",
     too_many_variants: "At most 500 variants: reduce the option values.",
     invalid_parameter_value: "A number parameter has a value that is not a number.",
@@ -1476,6 +1477,9 @@ export const en = {
     weight: "Weight (g)",
     isDefault: "Default",
     invalidEan: "Invalid EAN",
+    swatch: "Colour",
+    pickSwatch: "Pick colour",
+    invalidSwatch: "Use #rrggbb",
     assigned: "Assigned categories",
     noCategories: "No categories exist yet. Create them under Categories.",
     parameter: "Parameter",
