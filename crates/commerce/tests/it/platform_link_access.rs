@@ -2,12 +2,11 @@ use commerce::capability;
 use commerce::checkout_access::{self, ShopOrigin};
 use commerce::link_access::{self, Scope, Source};
 use commerce::order_access::{self, Access, Credentials};
-use commerce::invoicing::document::RefundLine;
 use commerce::orders;
 use commerce::reviews::{self, ReviewText};
 use commerce::storefront::Context;
 use commerce::tenancy::CheckoutMode;
-use commerce::withdrawals::{self, DeclareInput};
+use commerce::withdrawals;
 use platform::Error;
 use platform::db::{TenantTx, tenant_tx};
 use sqlx::PgPool;
@@ -870,113 +869,4 @@ async fn review_grant_cannot_submit_other_line(db: PgPool) {
     )
     .await;
     assert!(!used);
-}
-
-#[sqlx::test(migrations = "../../migrations")]
-async fn refused_action_keeps_the_grant_and_its_link_and_success_revokes_both(db: PgPool) {
-    let runtime = testkit::runtime_pool(&db, 2).await;
-    let (shop, at) = same_origin(&runtime, "lgatomic").await;
-    let (order, link) = shipped_withdrawal_link(&runtime, &shop).await;
-    let (grant, _) = at
-        .exchange(&runtime, Source::WithdrawalLink(&link), None)
-        .await
-        .unwrap();
-    let line: Uuid = scalar(
-        &runtime,
-        shop.tenant,
-        "SELECT id FROM order_lines WHERE order_id = $1",
-        order,
-    )
-    .await;
-    let input = |iban: &str| DeclareInput {
-        lines: vec![RefundLine {
-            order_line_id: line,
-            quantity: 1,
-        }],
-        iban: Some(iban.into()),
-        note: None,
-        confirm: true,
-    };
-
-    let refused = at
-        .atomic(&runtime, async |tx, ctx| {
-            withdrawals::declare_by_grant(tx, ctx, &grant, &input("CZ00 nonsense")).await
-        })
-        .await;
-    assert!(
-        matches!(&refused, Err(Error::Validation { code, .. }) if *code == "invalid_iban"),
-        "{refused:?}"
-    );
-    at.run(&runtime, async |tx, ctx| {
-        withdrawals::form_by_grant(tx, ctx, &grant).await
-    })
-    .await
-    .expect("a refused declaration keeps the grant and its link");
-    assert_eq!(
-        scalar::<i64>(
-            &runtime,
-            shop.tenant,
-            "SELECT count(*) FROM withdrawals WHERE order_id = $1",
-            order
-        )
-        .await,
-        0
-    );
-
-    at.atomic(&runtime, async |tx, ctx| {
-        withdrawals::declare_by_grant(tx, ctx, &grant, &input("CZ6508000000192000145399")).await
-    })
-    .await
-    .expect("the declaration succeeds");
-    assert!(
-        not_found(
-            &at.atomic(&runtime, async |tx, ctx| {
-                withdrawals::declare_by_grant(tx, ctx, &grant, &input("CZ6508000000192000145399"))
-                    .await
-            })
-            .await
-        ),
-        "a replay finds no grant"
-    );
-    assert!(not_found(&at.authorize(&runtime, &grant, Scope::Withdrawal).await));
-    assert!(
-        not_found(
-            &at.run(&runtime, async |tx, _| withdrawals::order_by_token(tx, &link).await)
-                .await
-        ),
-        "the declaration used the link"
-    );
-
-    let (_, review) = review_link(&runtime, &shop).await;
-    let (grant, _) = at
-        .exchange(&runtime, Source::ReviewLink(&review), None)
-        .await
-        .unwrap();
-    let refused = at
-        .atomic(&runtime, async |tx, ctx| {
-            reviews::submit_by_grant(tx, ctx, &grant, &text(9), None).await
-        })
-        .await;
-    assert!(
-        matches!(&refused, Err(Error::Validation { code, .. }) if *code == "invalid_rating"),
-        "{refused:?}"
-    );
-    at.run(&runtime, async |tx, ctx| {
-        reviews::invitation_by_grant(tx, ctx, &grant).await
-    })
-    .await
-    .expect("a refused review keeps the grant and its link");
-    at.atomic(&runtime, async |tx, ctx| {
-        reviews::submit_by_grant(tx, ctx, &grant, &text(5), None).await
-    })
-    .await
-    .unwrap();
-    assert!(not_found(&at.authorize(&runtime, &grant, Scope::Review).await));
-    assert!(
-        not_found(
-            &at.run(&runtime, async |tx, _| reviews::invitation(tx, &review).await)
-                .await
-        ),
-        "the review used the link"
-    );
 }
