@@ -1242,8 +1242,7 @@ pub async fn run_batch(
 
     let settings = rec_settings::get(&mut tx).await?;
     let assets = load_assets(&mut tx, &c.content).await?;
-    let mut contexts: HashMap<(Uuid, String), Option<(Context, Brand, PlatformLinks)>> =
-        HashMap::new();
+    let mut contexts: Shops = HashMap::new();
     let (mut sent, mut skipped) = (0, 0);
     for m in &members {
         let reason = match subscribers::may_receive(&mut tx, m.id).await? {
@@ -1326,6 +1325,8 @@ pub async fn run_batch(
     })
 }
 
+type Shops = HashMap<(Uuid, String), Option<(Context, Brand, PlatformLinks)>>;
+
 /// Renders and queues the message of one member (`Err(reason)` = skipped).
 #[allow(clippy::too_many_arguments)]
 async fn send_one(
@@ -1336,7 +1337,7 @@ async fn send_one(
     c: &Loaded,
     settings: &rec_settings::RecommendationSettings,
     assets: &HashMap<Uuid, Vec<AssetVariant>>,
-    contexts: &mut HashMap<(Uuid, String), Option<(Context, Brand, PlatformLinks)>>,
+    contexts: &mut Shops,
     m: &Member,
 ) -> Result<Result<(), &'static str>, Error> {
     let key = (m.market_id, m.locale.clone());
