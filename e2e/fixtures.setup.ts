@@ -20,7 +20,9 @@ test("seed the same-origin test origins of the demo shop", () => {
   for (const { shop, https, market } of markets) seedSameOrigin(shop, https, market);
   expect(
     sql(`SELECT string_agg(origin || ' ' || mode_generation, ',' ORDER BY origin COLLATE "C")
-         FROM platform.checkout_origins WHERE mode = 'same_origin'`),
+         FROM platform.checkout_origins
+         WHERE mode = 'same_origin'
+           AND tenant_id = (SELECT id FROM platform.tenants WHERE slug = 'demo')`),
   ).toBe(
     [FRESH, FRESH_HTTPS, FRESH_SK, FRESH_SK_HTTPS]
       .sort()

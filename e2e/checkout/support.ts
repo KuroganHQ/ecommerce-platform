@@ -34,6 +34,11 @@ export const checkoutOf = (shop: string) => shop.replace("://", "://checkout.");
 /** The demo shop's account origins (SHOP-95, A1): `<slug>.<ACCOUNT_DOMAIN>`, `<market>--<slug>.…`. */
 export const ACCOUNT = `http://demo.accounts.localhost:${port}`;
 export const ACCOUNT_SK = `http://sk--demo.accounts.localhost:${port}`;
+export const ACCOUNT_HTTPS = new URL(
+  `https://demo.accounts.localhost:${process.env.HTTPS_PORT ?? "8443"}`,
+).origin;
+export const CZ_HTTPS = new URL(`https://demo.localhost:${process.env.HTTPS_PORT ?? "8443"}`)
+  .origin;
 
 export const RESTARTED =
   "Pokladna byla mezitím spuštěna znovu nebo vypršela. Pokračujte s aktuálním košíkem.";
@@ -452,4 +457,33 @@ export async function postForm(
 export function linkToken(): { token: string; hash: string } {
   const token = randomBytes(32).toString("hex");
   return { token, hash: createHash("sha256").update(token).digest("hex") };
+}
+
+export async function signInByEmail(page: Page, email: string): Promise<void> {
+  const since = new Date(Date.now() - 1000);
+  const form = page.locator("form").first();
+  await form.getByLabel("E-mail").fill(email);
+  await form.getByRole("button", { name: "Poslat přihlašovací odkaz" }).click();
+  await expect(page.getByRole("status")).toContainText(email);
+  const deadline = Date.now() + 20_000;
+  let link: string | undefined;
+  while (!link && Date.now() < deadline) {
+    const res = await fetch(
+      `${mailpit}/api/v1/search?query=${encodeURIComponent(`to:"${email}"`)}`,
+    );
+    const body = (await res.json()) as { messages: MailSummary[] };
+    const hit = body.messages
+      .filter((m) => new Date(m.Created) >= since)
+      .sort((a, b) => b.Created.localeCompare(a.Created))[0];
+    if (hit) {
+      const msg = (await (await fetch(`${mailpit}/api/v1/message/${hit.ID}`)).json()) as {
+        Text: string;
+      };
+      link = /\/account\/verify\?token=[0-9a-f]{64}/.exec(msg.Text)?.[0];
+    }
+    if (!link) await new Promise((r) => setTimeout(r, 500));
+  }
+  if (!link) throw new Error(`no sign-in link for ${email}`);
+  await page.goto(`${new URL(page.url()).origin}${link}`);
+  await page.getByRole("button", { name: "Přihlásit se" }).click();
 }

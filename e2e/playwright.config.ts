@@ -19,6 +19,7 @@ const security = [
   "checkout/same-origin-start.spec.ts",
   "checkout/fixation.spec.ts",
   "checkout/restore.spec.ts",
+  "checkout/identity-isolation.spec.ts",
 ];
 
 export default defineConfig({

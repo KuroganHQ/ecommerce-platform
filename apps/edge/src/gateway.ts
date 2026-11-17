@@ -2059,6 +2059,7 @@ ${
     if (url.pathname === REOPEN_LINK_PATH) return reopenLink();
     if (isOrderPage(url.pathname)) return orderPage(site, req, url);
     if (url.pathname === "/withdraw") return withdrawalRequestPage(site, req, url);
+    if (url.pathname === "/consent") return consentPage(site, req, url);
     if (url.pathname === WITHDRAWAL_PAGE) return grantPage(site, req, url);
     if (url.pathname === REVIEW_PAGE)
       return req.method === "POST" ? reviewForm(site, req) : grantPage(site, req, url);
@@ -2134,6 +2135,15 @@ ${
     });
     page.headers.append("set-cookie", grantCookie(exchanged.grant));
     return page;
+  }
+
+  function consentPage(site: SameOriginSite, req: Request, url: URL): Promise<Response> | Response {
+    if (req.method !== "GET" && req.method !== "HEAD")
+      return text(405, "Method not allowed", { allow: "GET, HEAD" });
+    const subject = readCookie(req.headers, CONSENT_ID_COOKIE);
+    return renderPlatform(site, req, url, {
+      consentSubject: subject && CONSENT_ID_RE.test(subject) ? subject : undefined,
+    });
   }
 
   function grantPage(site: SameOriginSite, req: Request, url: URL): Promise<Response> | Response {
