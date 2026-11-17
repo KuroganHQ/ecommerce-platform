@@ -13,11 +13,18 @@ import {
   checkoutOf,
   choosePickupPoint,
   deferHydration,
+  FRESH_HTTPS,
   fakePay,
   fillContactAndAddress,
+  historyTraces,
   mail,
   newPage,
   order,
+  pageTokenMeta,
+  sameOriginOrder,
+  securityContext,
+  shopTab,
+  themeRequests,
   toCheckout,
 } from "./support";
 
@@ -139,4 +146,78 @@ test("guest withdrawal: emailed link, explicit confirmation, receipt, restock an
   await mail(email, `Vrácení peněz k objednávce ${o.number}`);
   await guest.context().close();
   await page.context().close();
+});
+
+test("same-origin withdrawal: request grant, emailed link on a clean URL, refused IBAN, supersession, single use", async ({
+  browser,
+}) => {
+  const email = `so-withdraw-${run}@example.test`;
+  const buyer = await securityContext(browser);
+  const page = await buyer.newPage();
+  const id = await sameOriginOrder(page, email);
+  const number = sql(`SELECT number FROM orders WHERE id = '${id}'`);
+  sql(`UPDATE orders SET status = 'shipped' WHERE id = '${id}'`);
+  await page.reload();
+
+  await page.getByRole("link", { name: "Odstoupit od nákupu" }).click();
+  await page.waitForURL(`${FRESH_HTTPS}/withdraw`);
+  await expect(pageTokenMeta(page), "the request grant's page token").toHaveCount(1);
+  await page.getByLabel("Číslo objednávky").fill(number);
+  await page.getByLabel("E-mail").fill(email);
+  await page.getByRole("button", { name: "Poslat potvrzovací odkaz" }).click();
+  await expect(page.getByText(/poslali jsme na e-mail potvrzovací odkaz/)).toBeVisible();
+
+  const linkMail = await mail(email, "Potvrďte odstoupení od smlouvy");
+  const token = /\/withdraw\?t=([0-9a-f]{64})/.exec(linkMail.Text)?.[1] ?? "";
+  expect(token).toMatch(/^[0-9a-f]{64}$/);
+  await page.goto(`${FRESH_HTTPS}/withdraw?t=${token}`);
+  await page.waitForURL(`${FRESH_HTTPS}/withdraw/declaration`);
+  const traces = await historyTraces(page);
+  for (const trace of [...traces.entries, traces.referrer, traces.html])
+    expect(trace, "no withdrawal link in history, referrer or HTML").not.toContain(token);
+  await expectAccessible(page, "same-origin withdrawal form");
+
+  const theme = await shopTab(buyer, `${FRESH_HTTPS}/`);
+  const reads = await themeRequests(theme, [
+    ["GET", "/withdraw/declaration"],
+    ["POST", "/_p/withdraw/declaration"],
+    ["POST", "/_p/withdraw"],
+  ]);
+  for (const r of reads) {
+    expect(r, "theme script gets no withdrawal data").toMatch(/ 403 $/);
+    expect(r).not.toContain(number);
+  }
+
+  const declare = async (iban: string) => {
+    await page.getByRole("checkbox", { name: /Tričko/ }).check();
+    await page.getByLabel("IBAN pro vrácení peněz").fill(iban);
+    await page.getByRole("button", { name: "Pokračovat" }).click();
+    await page.getByRole("button", { name: "Potvrdit odstoupení" }).click();
+  };
+  await declare("CZ00 nonsense");
+  await expect(page.getByRole("alert")).toContainText("Zkontrolujte IBAN");
+  await page.getByRole("button", { name: "Zpět k úpravám" }).click();
+
+  const other = await buyer.newPage();
+  await other.goto(`${FRESH_HTTPS}/withdraw`);
+  await page.getByLabel("IBAN pro vrácení peněz").fill("CZ6508000000192000145399");
+  await page.getByRole("button", { name: "Pokračovat" }).click();
+  await page.getByRole("button", { name: "Potvrdit odstoupení" }).click();
+  await expect(
+    page.getByText(/Odkaz je neplatný/),
+    "a newer grant in this browser superseded the declaration page",
+  ).toBeVisible();
+  expect(sql(`SELECT count(*) FROM withdrawals WHERE order_id = '${id}'`)).toBe("0");
+
+  await page.goto(`${FRESH_HTTPS}/withdraw?t=${token}`);
+  await page.waitForURL(`${FRESH_HTTPS}/withdraw/declaration`);
+  await declare("CZ6508000000192000145399");
+  await expect(page.getByRole("heading", { name: "Odstoupení přijato" })).toBeVisible();
+  await mail(email, `Odstoupení od objednávky ${number} přijato`);
+
+  await page.goto(`${FRESH_HTTPS}/withdraw?t=${token}`);
+  await page.waitForURL(`${FRESH_HTTPS}/withdraw?link=invalid`);
+  await expect(page.getByText(/Odkaz je neplatný/)).toBeVisible();
+  expect(sql(`SELECT count(*) FROM withdrawals WHERE order_id = '${id}'`)).toBe("1");
+  await buyer.close();
 });

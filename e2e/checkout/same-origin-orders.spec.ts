@@ -2,28 +2,18 @@ import { expect, type Page, test } from "@playwright/test";
 import { run } from "../admin/support";
 import {
   acceptAndPlace,
+  CLEAN_ORDER,
   chooseCashOnDelivery,
   choosePickupPoint,
   FRESH_HTTPS,
+  historyTraces,
   mail,
   pageTokenMeta,
   sameOriginReview,
   securityContext,
 } from "./support";
 
-const CLEAN_ORDER = /\/o\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/;
 const REOPEN = "Otevřete prosím odkaz z e-mailu znovu";
-
-const historyTraces = (page: Page) =>
-  page.evaluate(() => {
-    const nav = (window as unknown as { navigation?: { entries(): { url: string | null }[] } })
-      .navigation;
-    return {
-      entries: nav ? nav.entries().map((e) => e.url ?? "") : [location.href],
-      referrer: document.referrer,
-      html: document.documentElement.outerHTML,
-    };
-  });
 
 async function placed(page: Page): Promise<string> {
   await acceptAndPlace(page);

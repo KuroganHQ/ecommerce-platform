@@ -6,6 +6,7 @@
  *
  * WP19's invite flow issues the review link after the dev clock advances seven days.
  */
+import { createHash, randomBytes } from "node:crypto";
 import { type Browser, expect, type Page, test } from "@playwright/test";
 import { expectAccessible, run, signInOwner, sql } from "../admin/support";
 import { rateHeaders } from "../rate-client";
@@ -13,11 +14,17 @@ import {
   acceptAndPlace,
   CZ,
   choosePickupPoint,
+  FRESH_HTTPS,
   fakePay,
   fillContactAndAddress,
+  historyTraces,
   mail,
   newPage,
   order,
+  sameOriginOrder,
+  securityContext,
+  shopTab,
+  themeRequests,
   toCheckout,
 } from "./support";
 
@@ -179,4 +186,76 @@ test("review link → form → moderation → product page with rating JSON-LD",
     .toBe(0);
   await shop.context().close();
   await page.context().close();
+});
+
+test("same-origin review: the link becomes a grant, the form posts _pt, refusals keep it, single use", async ({
+  browser,
+}) => {
+  const email = `so-review-${run}@example.test`;
+  const buyer = await securityContext(browser, { viewport: { width: 390, height: 844 } });
+  const page = await buyer.newPage();
+  const id = await sameOriginOrder(page, email);
+  sql(`UPDATE orders SET status = 'delivered' WHERE id = '${id}'`);
+  const token = randomBytes(32).toString("hex");
+  const hash = createHash("sha256").update(token).digest("hex");
+  sql(`INSERT INTO review_tokens (tenant_id, order_line_id, order_id, product_id, token_hash, expires_at)
+    SELECT tenant_id, id, order_id, product_id, '\\x${hash}'::bytea, now() + interval '90 days'
+    FROM order_lines WHERE order_id = '${id}' ORDER BY position LIMIT 1`);
+  const link = `${FRESH_HTTPS}/review?token=${token}`;
+
+  await page.goto(link);
+  await page.waitForURL(`${FRESH_HTTPS}/review`);
+  await expect(page.getByRole("heading", { name: "Napsat recenzi" })).toBeVisible();
+  await expect(page.locator('input[name="_pt"]')).toHaveCount(1);
+  await expect(page.locator('input[name="token"]')).toHaveCount(0);
+  const traces = await historyTraces(page);
+  for (const trace of [...traces.entries, traces.referrer, traces.html])
+    expect(trace, "no review link in history, referrer or HTML").not.toContain(token);
+  await expectAccessible(page, "same-origin review form");
+
+  const theme = await shopTab(buyer, `${FRESH_HTTPS}/`);
+  for (const r of await themeRequests(theme, [
+    ["GET", "/review"],
+    ["POST", "/review"],
+  ]))
+    expect(r, "theme script gets no review data").toMatch(/ 403 $/);
+
+  const fill = async (name: string) => {
+    await page.getByRole("radio", { name: "5 z 5 hvězdiček" }).check();
+    await page.getByLabel("Jméno zobrazené u recenze").fill(name);
+    await page.getByLabel("Vaše recenze").fill("Sedí přesně.");
+  };
+  await fill(" \u0007 ");
+  await page.getByRole("button", { name: "Odeslat recenzi" }).click();
+  await page.waitForURL(`${FRESH_HTTPS}/review?error=invalid_name`);
+  await expect(page.getByRole("alert")).toContainText("Recenzi se nepodařilo odeslat");
+
+  const other = await buyer.newPage();
+  await other.goto(`${FRESH_HTTPS}/withdraw`);
+  await fill("Jana N.");
+  await page.getByRole("button", { name: "Odeslat recenzi" }).click();
+  await page.waitForURL(`${FRESH_HTTPS}/review`);
+  await expect(page.getByRole("alert")).toContainText("neplatný");
+  expect(
+    sql(`SELECT count(*) FROM reviews r JOIN order_lines l ON l.id = r.order_line_id
+    WHERE l.order_id = '${id}'`),
+  ).toBe("0");
+
+  await page.goto(link);
+  await page.waitForURL(`${FRESH_HTTPS}/review`);
+  await fill("Jana N.");
+  await page.getByLabel("Vaše recenze").focus();
+  await page.keyboard.press("Tab");
+  await page.keyboard.press("Enter");
+  await page.waitForURL(`${FRESH_HTTPS}/review?done=1`);
+  await expect(page.getByRole("status")).toContainText("Děkujeme!");
+
+  await page.goto(link);
+  await page.waitForURL(`${FRESH_HTTPS}/review?link=invalid`);
+  await expect(page.getByRole("alert")).toContainText("neplatný");
+  expect(
+    sql(`SELECT count(*) FROM reviews r JOIN order_lines l ON l.id = r.order_line_id
+    WHERE l.order_id = '${id}'`),
+  ).toBe("1");
+  await buyer.close();
 });
