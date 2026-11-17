@@ -458,6 +458,7 @@ async fn internal_resolve_needs_the_service_token(db: PgPool) {
     assert_eq!(body["tenant_id"], created.tenant_id.to_string());
     assert_eq!(body["market_code"], "cz");
     assert_eq!(body["hostname"], "demo.localhost");
+    assert_eq!(body["account_hostname"], "demo.accounts.localhost");
 
     let (status, _, _) = Call::get("/internal/v1/resolve?host=unknown.localhost")
         .token(SERVICE_TOKEN)

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT code, currency, default_locale, locales, country_codes FROM markets WHERE id = $1",
+  "query": "SELECT code, currency, default_locale, locales, country_codes, is_default\n         FROM markets WHERE id = $1",
   "describe": {
     "columns": [
       {
@@ -57,6 +57,17 @@
             "name": "country_codes"
           }
         }
+      },
+      {
+        "ordinal": 5,
+        "name": "is_default",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "markets",
+            "name": "is_default"
+          }
+        }
       }
     ],
     "parameters": {
@@ -69,8 +80,9 @@
       false,
       false,
       false,
+      false,
       false
     ]
   },
-  "hash": "46ade60ce5069fc0bc8f82c25e3156611d6bd48c8a83822ceedded766087589c"
+  "hash": "d4b50a329ed9eed1a79ea0284383d05522d06ecd750f9529a5ecab8508ea6582"
 }

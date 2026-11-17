@@ -395,6 +395,8 @@ pub struct Resolved {
     /// The market's shop host: `hostname` itself for a shop, the market's primary domain for
     /// an account origin.
     pub shop_hostname: String,
+    /// The market's account origin label ([`account_host_label`]).
+    pub account_label: String,
     pub tenant_id: Uuid,
     pub tenant_slug: String,
     pub market_id: Uuid,
@@ -553,7 +555,8 @@ async fn resolve_shop(db: &PgPool, host: String) -> Result<Option<Resolved>, Err
     .collect::<Result<_, Error>>()?;
     let mut tx = tenant_tx(db, d.tenant_id).await?;
     let m = sqlx::query!(
-        "SELECT code, currency, default_locale, locales, country_codes FROM markets WHERE id = $1",
+        "SELECT code, currency, default_locale, locales, country_codes, is_default
+         FROM markets WHERE id = $1",
         d.market_id
     )
     .fetch_one(&mut *tx)
@@ -565,6 +568,7 @@ async fn resolve_shop(db: &PgPool, host: String) -> Result<Option<Resolved>, Err
         shop_hostname: host.clone(),
         hostname: host,
         kind: HostKind::Shop,
+        account_label: account_host_label(&d.slug, &m.code, m.is_default),
         tenant_id: d.tenant_id,
         tenant_slug: d.slug,
         market_id: d.market_id,

@@ -7,7 +7,6 @@ mod analytics;
 mod catalog;
 mod checkout;
 mod checkout_access;
-mod consent;
 mod customers;
 mod experiment_guardrails;
 mod experiment_lifecycle;

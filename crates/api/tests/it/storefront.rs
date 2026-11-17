@@ -885,6 +885,13 @@ async fn artifacts_are_published_to_tenants_and_served_to_the_edge(db: PgPool) {
     assert_eq!(resolved["theme_artifact"], id);
     assert_eq!(resolved["market_id"], c.shop.sk.to_string());
     assert_eq!(resolved["default_locale"], "sk");
+    assert_eq!(
+        resolved["account_hostname"],
+        format!(
+            "sk--{}.accounts.localhost",
+            resolved["tenant_slug"].as_str().unwrap()
+        )
+    );
 
     let uri = format!("/internal/v1/artifacts/{id}/server/entry.mjs");
     let (status, body, _) = Call::get(&uri).token(SERVICE_TOKEN).send_text(&c.s).await;

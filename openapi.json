@@ -15715,7 +15715,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Resolved"
+                  "$ref": "#/components/schemas/ResolvedSite"
                 }
               }
             }
@@ -17840,7 +17840,7 @@
         "tags": [
           "storefront"
         ],
-        "summary": "The current choice: cookie purposes from the anonymous subject (this browser), email\npurposes from the signed-in customer (checkout origin). `text_version: null` means no choice\nyet.",
+        "summary": "The anonymous subject's current choice. `text_version: null` means no choice yet.",
         "operationId": "get_consent",
         "parameters": [
           {
@@ -17878,18 +17878,6 @@
             "name": "X-Consent-Subject",
             "in": "header",
             "description": "Anonymous subject id from the consent cookie (32 hex characters).",
-            "required": false,
-            "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
-            }
-          },
-          {
-            "name": "X-Customer-Session",
-            "in": "header",
-            "description": "Checkout origin only: the signed-in customer's session.",
             "required": false,
             "schema": {
               "type": [
@@ -17939,7 +17927,7 @@
         "tags": [
           "storefront"
         ],
-        "summary": "Records a choice for the anonymous subject (minted on the first choice) and, when signed in\non the checkout origin, for the customer. Answers the anonymous subject's new state.",
+        "summary": "Records a choice for the anonymous subject (minted on the first choice) and answers its new\nstate.",
         "operationId": "post_consent",
         "parameters": [
           {
@@ -17977,18 +17965,6 @@
             "name": "X-Consent-Subject",
             "in": "header",
             "description": "Anonymous subject id from the consent cookie (32 hex characters).",
-            "required": false,
-            "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
-            }
-          },
-          {
-            "name": "X-Customer-Session",
-            "in": "header",
-            "description": "Checkout origin only: the signed-in customer's session.",
             "required": false,
             "schema": {
               "type": [
@@ -18614,30 +18590,6 @@
             }
           },
           {
-            "name": "X-Cart-Token",
-            "in": "header",
-            "description": "Checkout cart capability (`__Host-cart`): the cart is attached to the customer (A4).",
-            "required": false,
-            "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
-            }
-          },
-          {
-            "name": "X-Consent-Subject",
-            "in": "header",
-            "description": "Anonymous consent subject (consent cookie): its choices move to the customer (A20).",
-            "required": false,
-            "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
-            }
-          },
-          {
             "name": "X-Client-Ip",
             "in": "header",
             "description": "The client's IP (rate limits; stored only as a salted hash).",
@@ -18802,30 +18754,6 @@
             }
           },
           {
-            "name": "X-Cart-Token",
-            "in": "header",
-            "description": "Checkout cart capability (`__Host-cart`): the cart is attached to the customer (A4).",
-            "required": false,
-            "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
-            }
-          },
-          {
-            "name": "X-Consent-Subject",
-            "in": "header",
-            "description": "Anonymous consent subject (consent cookie): its choices move to the customer (A20).",
-            "required": false,
-            "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
-            }
-          },
-          {
             "name": "X-Client-Ip",
             "in": "header",
             "description": "The client's IP (rate limits; stored only as a salted hash).",
@@ -18904,30 +18832,6 @@
             "name": "X-Locale",
             "in": "header",
             "description": "Locale hint (one of the market's locales).",
-            "required": false,
-            "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
-            }
-          },
-          {
-            "name": "X-Cart-Token",
-            "in": "header",
-            "description": "Checkout cart capability (`__Host-cart`): the cart is attached to the customer (A4).",
-            "required": false,
-            "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
-            }
-          },
-          {
-            "name": "X-Consent-Subject",
-            "in": "header",
-            "description": "Anonymous consent subject (consent cookie): its choices move to the customer (A20).",
             "required": false,
             "schema": {
               "type": [
@@ -19658,18 +19562,6 @@
             "name": "X-Consent-Subject",
             "in": "header",
             "description": "Anonymous subject id from the consent cookie (32 hex characters).",
-            "required": false,
-            "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
-            }
-          },
-          {
-            "name": "X-Customer-Session",
-            "in": "header",
-            "description": "Checkout origin only: the signed-in customer's session.",
             "required": false,
             "schema": {
               "type": [
@@ -36242,6 +36134,7 @@
           "hostname",
           "kind",
           "shop_hostname",
+          "account_label",
           "tenant_id",
           "tenant_slug",
           "market_id",
@@ -36255,6 +36148,10 @@
           "checkout_origins"
         ],
         "properties": {
+          "account_label": {
+            "type": "string",
+            "description": "The market's account origin label ([`account_host_label`])."
+          },
           "checkout_artifact": {
             "type": [
               "string",
@@ -36359,6 +36256,25 @@
             "type": "string"
           }
         }
+      },
+      "ResolvedSite": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Resolved"
+          },
+          {
+            "type": "object",
+            "required": [
+              "account_hostname"
+            ],
+            "properties": {
+              "account_hostname": {
+                "type": "string"
+              }
+            }
+          }
+        ],
+        "description": "[`Resolved`] plus the market's account origin host, `<label>.<ACCOUNT_DOMAIN>` (A1)."
       },
       "RestoreResult": {
         "type": "object",
