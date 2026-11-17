@@ -49,6 +49,7 @@ const AiBulkEdit = lazy(() => import("./pages/AiBulkEdit.tsx"));
 const AiSettings = lazy(() => import("./pages/AiSettings.tsx"));
 const Webhooks = lazy(() => import("./pages/Webhooks.tsx"));
 const AdTracking = lazy(() => import("./pages/AdTracking.tsx"));
+const CheckoutOrigins = lazy(() => import("./pages/CheckoutOrigins.tsx"));
 const PlatformJobs = lazy(() => import("./pages/PlatformJobs.tsx"));
 const Subscribers = lazy(() => import("./pages/Subscribers.tsx"));
 const Reviews = lazy(() => import("./pages/Reviews.tsx"));
@@ -152,6 +153,7 @@ export function App() {
           <Route path="/audit-log" component={AuditLog} />
           <Route path="/settings/webhooks" component={Webhooks} />
           <Route path="/settings/ad-tracking" component={AdTracking} />
+          <Route path="/settings/checkout-origins" component={CheckoutOrigins} />
           <Route path="/settings/emails" component={Emails} />
           <Route path="/settings/email-branding" component={EmailBranding} />
           <Route path="/marketing/subscribers" component={Subscribers} />
