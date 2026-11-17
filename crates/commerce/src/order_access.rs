@@ -2,7 +2,7 @@ use platform::Error;
 use platform::db::TenantTx;
 use uuid::Uuid;
 
-use crate::checkout_access::{converted, enter};
+use crate::checkout_access::{enter, placed_by};
 use crate::link_access::{self, Scope};
 use crate::orders;
 use crate::storefront::Context;
@@ -75,7 +75,7 @@ async fn pays(
     order: Uuid,
     checkout: &str,
 ) -> Result<bool, Error> {
-    let cart = match converted(tx, ctx, checkout).await {
+    let cart = match placed_by(tx, ctx, checkout).await {
         Ok(cart) => cart,
         Err(Error::NotFound) => return Ok(false),
         Err(e) => return Err(e),

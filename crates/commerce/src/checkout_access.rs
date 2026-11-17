@@ -94,6 +94,7 @@ enum Reach {
     Open { refresh: bool },
     Placement,
     Receipt,
+    Order,
 }
 
 impl Reach {
@@ -101,7 +102,7 @@ impl Reach {
         match self {
             Reach::Open { .. } => &["open"],
             Reach::Placement => &["open", "converted"],
-            Reach::Receipt => &["converted"],
+            Reach::Receipt | Reach::Order => &["converted"],
         }
     }
 
@@ -295,11 +296,30 @@ pub(crate) async fn converted(
     ctx: &Context,
     token: &str,
 ) -> Result<CartRef, Error> {
+    converted_by(tx, ctx, token, Reach::Receipt).await
+}
+
+/// The converted checkout behind its current capability only: a capability a rotation
+/// replaced keeps its receipt, never the order or its payment (C6).
+pub(crate) async fn placed_by(
+    tx: &mut TenantTx,
+    ctx: &Context,
+    token: &str,
+) -> Result<CartRef, Error> {
+    converted_by(tx, ctx, token, Reach::Order).await
+}
+
+async fn converted_by(
+    tx: &mut TenantTx,
+    ctx: &Context,
+    token: &str,
+    reach: Reach,
+) -> Result<CartRef, Error> {
     let p = enter(tx, ctx).await?;
     if p.mode != CheckoutMode::SameOrigin {
         return Err(Error::NotFound);
     }
-    Ok(guard(tx, ctx, &p, token, Reach::Receipt).await?.0)
+    Ok(guard(tx, ctx, &p, token, reach).await?.0)
 }
 
 async fn lock_source_before_checkout(tx: &mut TenantTx, token: &str) -> Result<(), Error> {

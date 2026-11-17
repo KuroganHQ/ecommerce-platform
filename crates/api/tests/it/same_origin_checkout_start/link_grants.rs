@@ -330,3 +330,62 @@ async fn clean_order_page_reads_by_grant_and_only_the_placing_checkout_pays(db: 
         format!("/_p/fake-pay/{second}?return=/o/{id}")
     );
 }
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_capability_replaced_at_placement_neither_reads_nor_pays_the_order(db: PgPool) {
+    let c = setup(db, CheckoutMode::SameOrigin).await;
+    let p = c.placed(c.placeable().await, "Zvonit dvakrát").await;
+    assert_ne!(p.presented, p.current, "the note replaced the capability");
+    let id = p.order["order_id"].as_str().unwrap();
+    let attempt = p.order["payment"]["attempt_id"].as_str().unwrap();
+    let order = format!("/storefront/v1/orders/{id}");
+    let replaced = Some(p.presented.as_str());
+
+    let (status, body) = c.on_order(Call::get(&order), replaced, None).await;
+    assert_eq!(
+        status,
+        StatusCode::NOT_FOUND,
+        "the replaced capability reads nothing: {body}"
+    );
+    assert!(!body.to_string().contains("Zvonit"), "nor the note");
+    for (call, what) in [
+        (Call::get(&format!("{order}/payment")), "payment"),
+        (Call::get(&format!("{order}/documents")), "documents"),
+        (
+            Call::post(&format!("{order}/payment-attempts"), json!({})),
+            "retry",
+        ),
+        (
+            Call::post(
+                &format!("{order}/payment-attempts/{attempt}/init"),
+                json!({}),
+            ),
+            "init",
+        ),
+    ] {
+        let (status, body) = c.on_order(call, replaced, None).await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{what}: {body}");
+    }
+    let fake_pay = format!("/storefront/v1/checkout/fake-pay/{attempt}");
+    for call in [
+        Call::get(&fake_pay),
+        Call::post(&fake_pay, json!({"outcome": "succeeded"})),
+    ] {
+        let (status, body) = c.on_order(call, replaced, None).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "fake pay: {body}");
+        assert_eq!(body["code"], "payment_not_allowed");
+    }
+    let (status, receipt) = c.receipt(&p.presented).await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "slice 8's receipt recovery stays: {receipt}"
+    );
+
+    let (status, view) = c.on_order(Call::get(&order), Some(&p.current), None).await;
+    assert_eq!(status, StatusCode::OK, "{view}");
+    assert_eq!(
+        view["payment"]["can_pay"], true,
+        "the current capability pays"
+    );
+}

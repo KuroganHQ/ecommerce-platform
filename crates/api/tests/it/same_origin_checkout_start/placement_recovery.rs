@@ -4,7 +4,7 @@ use super::*;
 pub(super) struct Placed {
     shop_token: String,
     rotated_away: [String; 2],
-    presented: String,
+    pub(super) presented: String,
     pub(super) current: String,
     body: Value,
     pub(super) order: Value,
