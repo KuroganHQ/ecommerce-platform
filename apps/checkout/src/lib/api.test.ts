@@ -17,6 +17,8 @@ test.each([
   ["myWithdrawalForm", id, `/customer/orders/${id}/withdrawal`],
   ["orderDocuments", token, `/orders/${token}/documents`],
   ["myDocuments", id, `/customer/orders/${id}/documents`],
+  ["order", token, `/orders/${token}`],
+  ["order", id, `/link-grants/orders/${id}`],
 ] as const)(
   "%s uses the scoped binding and rejects malformed identifiers",
   async (method, value, path) => {

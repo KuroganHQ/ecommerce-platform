@@ -16,6 +16,7 @@ export interface RequestContext {
   /** Artifact that is allowed to use this context (a worker cannot borrow another's). */
   artifactId: string;
   cartToken?: string | undefined;
+  linkGrant?: string | undefined;
   /** Checkout origin only: the customer session from the `__Host-sid` cookie (WP9). */
   sessionToken?: string | undefined;
   /** Checkout origin only: the anonymous consent subject (preferences page, A20). */
@@ -79,6 +80,7 @@ const CREDENTIAL_HEADERS = [
   "x-locale",
   "x-storefront-token",
   "x-cart-token",
+  "x-link-grant",
   "x-session",
   "x-customer-session",
   "x-consent-subject",
@@ -133,6 +135,7 @@ export const CHECKOUT_OPERATIONS: Operation[] = [
   { method: "GET", path: /^\/checkout$/ },
   { method: "GET", path: /^\/checkout\/order$/ },
   { method: "GET", path: /^\/orders\/[0-9a-f]{64}$/ },
+  { method: "GET", path: /^\/link-grants\/orders\/[0-9a-f-]{36}$/ },
   { method: "GET", path: /^\/customer\/orders$/ },
   { method: "GET", path: /^\/customer\/orders\/[0-9a-f-]{36}$/ },
   // WP18: the newsletter confirmation and preference pages (token in the query).
@@ -194,10 +197,10 @@ export function restrictedBinding(opts: {
       "x-locale": ctx.site.locale,
       "x-storefront-token": ctx.site.storefront_token,
     });
-    if (ctx.cartToken) {
-      headers.set("x-cart-token", ctx.cartToken);
-      if (ctx.site.shopOrigin) headers.set("x-shop-origin", ctx.site.shopOrigin);
-    }
+    if (ctx.cartToken) headers.set("x-cart-token", ctx.cartToken);
+    if (ctx.linkGrant) headers.set("x-link-grant", ctx.linkGrant);
+    if ((ctx.cartToken || ctx.linkGrant) && ctx.site.shopOrigin)
+      headers.set("x-shop-origin", ctx.site.shopOrigin);
     if (ctx.sessionToken) headers.set("x-customer-session", ctx.sessionToken);
     if (ctx.consentSubject) headers.set("x-consent-subject", ctx.consentSubject);
     if (ctx.site.clientIp) headers.set("x-client-ip", ctx.site.clientIp);

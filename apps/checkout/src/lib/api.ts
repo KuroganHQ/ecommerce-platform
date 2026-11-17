@@ -38,7 +38,11 @@ export function checkoutApi(request: Request) {
     checkout: () => get<CheckoutView>("/checkout"),
     receipt: () => get<CheckoutReceipt>("/checkout/order"),
     order: (token: string) =>
-      /^[0-9a-f]{64}$/.test(token) ? get<Order>(`/orders/${token}`) : Promise.resolve(null),
+      /^[0-9a-f]{64}$/.test(token)
+        ? get<Order>(`/orders/${token}`)
+        : /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(token)
+          ? get<Order>(`/link-grants/orders/${token}`)
+          : Promise.resolve(null),
     orders: async () => (await get<OrderPage>("/customer/orders"))?.items ?? [],
     customerOrder: (id: string) =>
       /^[0-9a-f-]{36}$/.test(id) ? get<Order>(`/customer/orders/${id}`) : Promise.resolve(null),

@@ -21,13 +21,13 @@ use tokio::sync::oneshot;
 use uuid::Uuid;
 
 #[derive(Clone)]
-struct At {
+pub(crate) struct At {
     tenant: Uuid,
     market: Uuid,
     origin: Option<ShopOrigin>,
 }
 
-fn at(shop: &Shop, market: Uuid, origin: &ShopOrigin) -> At {
+pub(crate) fn at(shop: &Shop, market: Uuid, origin: &ShopOrigin) -> At {
     At {
         tenant: shop.tenant,
         market,
@@ -36,7 +36,7 @@ fn at(shop: &Shop, market: Uuid, origin: &ShopOrigin) -> At {
 }
 
 impl At {
-    async fn tx(&self, runtime: &PgPool) -> (TenantTx, Context) {
+    pub(crate) async fn tx(&self, runtime: &PgPool) -> (TenantTx, Context) {
         let mut tx = tenant_tx(runtime, self.tenant).await.unwrap();
         let mut ctx = storefront::context(
             &mut tx,
@@ -51,7 +51,7 @@ impl At {
         (tx, ctx)
     }
 
-    async fn run<T>(
+    pub(crate) async fn run<T>(
         &self,
         runtime: &PgPool,
         f: impl AsyncFnOnce(&mut TenantTx, &Context) -> T,

@@ -28,6 +28,7 @@ pub mod idempotency;
 pub mod insights;
 pub mod inventory;
 pub mod invoicing;
+pub mod link_access;
 pub mod marketing;
 pub mod markets;
 pub mod media;

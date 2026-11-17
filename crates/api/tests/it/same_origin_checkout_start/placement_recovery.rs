@@ -1,13 +1,13 @@
 use super::pii_rotation::{addresses, cart_id, contact, holds_a_capability, place_body};
 use super::*;
 
-struct Placed {
+pub(super) struct Placed {
     shop_token: String,
     rotated_away: [String; 2],
     presented: String,
     current: String,
     body: Value,
-    number: Value,
+    pub(super) number: Value,
     cart: Uuid,
 }
 
@@ -47,7 +47,7 @@ impl Ctx {
         }
     }
 
-    async fn placed(&self, method: Uuid, note: &str) -> Placed {
+    pub(super) async fn placed(&self, method: Uuid, note: &str) -> Placed {
         let shop_token = self.shop_cart().await;
         let k0 = self.started(&shop_token, None).await;
         let k1 = self.rotated(&k0, contact("jana@example.cz")).await;

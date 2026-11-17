@@ -38,10 +38,10 @@ impl ShopOrigin {
     }
 }
 
-struct Policy<'a> {
-    origin: &'a str,
-    generation: i64,
-    mode: CheckoutMode,
+pub(crate) struct Policy<'a> {
+    pub(crate) origin: &'a str,
+    pub(crate) generation: i64,
+    pub(crate) mode: CheckoutMode,
 }
 
 pub(crate) async fn fence(tx: &mut TenantTx) -> Result<(), Error> {
@@ -54,7 +54,7 @@ pub(crate) async fn fence(tx: &mut TenantTx) -> Result<(), Error> {
     Ok(())
 }
 
-async fn enter<'a>(tx: &mut TenantTx, ctx: &'a Context) -> Result<Policy<'a>, Error> {
+pub(crate) async fn enter<'a>(tx: &mut TenantTx, ctx: &'a Context) -> Result<Policy<'a>, Error> {
     let origin = ctx.origin.as_ref().ok_or(Error::Forbidden {
         code: "shop_origin_required",
     })?;
@@ -181,7 +181,7 @@ async fn bind(tx: &mut TenantTx, cart_id: Uuid, p: &Policy<'_>) -> Result<Option
     Ok((updated == 1).then_some(minted.token))
 }
 
-fn require(p: &Policy<'_>, mode: CheckoutMode) -> Result<(), Error> {
+pub(crate) fn require(p: &Policy<'_>, mode: CheckoutMode) -> Result<(), Error> {
     if p.mode == mode {
         Ok(())
     } else {

@@ -19964,6 +19964,262 @@
         }
       }
     },
+    "/storefront/v1/link-grants": {
+      "post": {
+        "tags": [
+          "storefront"
+        ],
+        "summary": "Exchanges a link for a grant scoped to its resource and action, this origin and its\ncheckout mode, and revokes `previous`. The grant is in the `X-Link-Grant` response header.",
+        "operationId": "exchange",
+        "parameters": [
+          {
+            "name": "X-Storefront-Token",
+            "in": "header",
+            "description": "The tenant's public storefront token.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Market",
+            "in": "header",
+            "description": "Market id resolved from the shop host by the edge.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-Locale",
+            "in": "header",
+            "description": "Locale hint (one of the market's locales).",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExchangeInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "headers": {
+              "X-Link-Grant": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "The new grant"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Exchanged"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "unknown or expired link",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "checkout_mode_changed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/storefront/v1/link-grants/orders/{id}": {
+      "get": {
+        "tags": [
+          "storefront"
+        ],
+        "summary": "The order a grant may read. Paying stays with the checkout capability or the customer.",
+        "operationId": "order",
+        "parameters": [
+          {
+            "name": "X-Storefront-Token",
+            "in": "header",
+            "description": "The tenant's public storefront token.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Market",
+            "in": "header",
+            "description": "Market id resolved from the shop host by the edge.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-Locale",
+            "in": "header",
+            "description": "Locale hint (one of the market's locales).",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "X-Link-Grant",
+            "in": "header",
+            "description": "The link grant from the `__Host-Http-cap` cookie.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrderView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "no grant for this order",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/storefront/v1/link-grants/withdrawal-request": {
+      "post": {
+        "tags": [
+          "storefront"
+        ],
+        "summary": "The public withdrawal form's request (as `POST /withdrawals`, always `202`). It completes\nthe anonymous grant in the same transaction, so a refused request keeps it.",
+        "operationId": "request_withdrawal",
+        "parameters": [
+          {
+            "name": "X-Storefront-Token",
+            "in": "header",
+            "description": "The tenant's public storefront token.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Market",
+            "in": "header",
+            "description": "Market id resolved from the shop host by the edge.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-Locale",
+            "in": "header",
+            "description": "Locale hint (one of the market's locales).",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "X-Link-Grant",
+            "in": "header",
+            "description": "The link grant from the `__Host-Http-cap` cookie.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LinkRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {},
+          "404": {
+            "description": "no withdrawal-request grant",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "invalid_email",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/storefront/v1/newsletter/click": {
       "get": {
         "tags": [
@@ -29007,6 +29263,36 @@
         },
         "additionalProperties": false
       },
+      "ExchangeInput": {
+        "type": "object",
+        "required": [
+          "link"
+        ],
+        "properties": {
+          "link": {
+            "$ref": "#/components/schemas/LinkInput"
+          },
+          "previous": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The grant the browser held before; it is revoked."
+          }
+        },
+        "additionalProperties": false
+      },
+      "Exchanged": {
+        "type": "object",
+        "required": [
+          "resource"
+        ],
+        "properties": {
+          "resource": {
+            "$ref": "#/components/schemas/GrantedResource"
+          }
+        }
+      },
       "Experiment": {
         "type": "object",
         "required": [
@@ -30173,6 +30459,43 @@
             ]
           }
         }
+      },
+      "GrantedResource": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "id",
+              "kind"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "order"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "withdrawal_request"
+                ]
+              }
+            }
+          }
+        ]
       },
       "HandoffToken": {
         "type": "object",
@@ -31422,6 +31745,44 @@
             "type": "string"
           }
         }
+      },
+      "LinkInput": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "The order email link (`/o/<token>`); it stays valid until its own expiry.",
+            "required": [
+              "token",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "order"
+                ]
+              },
+              "token": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "The public withdrawal form, which has no link.",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "withdrawal_request"
+                ]
+              }
+            }
+          }
+        ]
       },
       "LinkRequest": {
         "type": "object",
