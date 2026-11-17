@@ -5,7 +5,7 @@
 //! link, is revoked when the browser opens a newer link and, for single-use actions, when the
 //! action completes in the caller's transaction.
 
-use chrono::{DateTime, Duration, Utc};
+use chrono::{Duration, Utc};
 use platform::Error;
 use platform::db::TenantTx;
 use uuid::Uuid;
@@ -63,12 +63,7 @@ pub async fn exchange(
 ) -> Result<Granted, Error> {
     let p = enter(tx, ctx).await?;
     require(&p, CheckoutMode::SameOrigin)?;
-    let (scope, link_hash, action_hash, expires_at): (
-        Scope,
-        Option<Vec<u8>>,
-        Option<Vec<u8>>,
-        DateTime<Utc>,
-    ) = match source {
+    let (scope, link_hash, action_hash, expires_at) = match source {
         Source::OrderLink(token) => {
             let hash = link(token)?;
             let row = sqlx::query!(
