@@ -40,7 +40,7 @@ const NAVIGATE = {
 const marker = () => `pii${randomBytes(6).toString("hex")}`;
 const emailOf = (who: string, browserName: string) =>
   `${who}-${browserName}-${run}-${randomBytes(3).toString("hex")}@example.test`;
-const stateHash = (state: string) => `sha256(convert_to('${state}', 'UTF8'))`;
+const hashOf = (value: string) => `sha256(convert_to('${value}', 'UTF8'))`;
 
 const footprint = (email: string) =>
   sql(`SELECT (SELECT count(*) FROM orders o JOIN customers c ON c.id = o.customer_id
@@ -178,7 +178,7 @@ test("a capability and identify state planted by a signed-in attacker leave the 
     "0,0",
   );
   expect(
-    sql(`SELECT count(*) FROM checkout_identities WHERE state_hash = ${stateHash(state)}
+    sql(`SELECT count(*) FROM checkout_identities WHERE state_hash = ${hashOf(state)}
            AND consumed_at IS NOT NULL`),
     "the planted state links no account",
   ).toBe("0");
@@ -213,10 +213,8 @@ test("an identify callback this checkout did not start is refused and links noth
   await startSameOriginCheckout(page, FRESH_HTTPS);
   await saveContact(page, emailOf("victim", browserName));
   const cap = await cookieValue(context, CART);
-  for (const variant of [url.href, `${url.href}&next=%2F`, `${url.href}&state=x`]) {
-    await page.goto(variant);
-    await page.waitForURL(`${FRESH_HTTPS}/checkout?error=identify_failed`);
-  }
+  await page.goto(url.href);
+  await page.waitForURL(`${FRESH_HTTPS}/checkout?error=identify_failed`);
   expect(await cookieValue(context, CART), "the victim's capability did not rotate").toBe(cap);
   expect(
     sql(`SELECT count(*) FROM checkout_identities i JOIN carts c ON c.id = i.cart_id
@@ -227,6 +225,59 @@ test("an identify callback this checkout did not start is refused and links noth
   await expect(detailsForm(page, "addresses")).toBeVisible();
   await context.close();
   await attacker.close();
+});
+
+test("a malformed callback on a pending identify is refused without consuming it; the exact one links", async ({
+  browser,
+  browserName,
+}) => {
+  const account = emailOf("account", browserName);
+  const context = await securityContext(browser);
+  const page = await context.newPage();
+  await startSameOriginCheckout(page, FRESH_HTTPS);
+  await saveContact(page, emailOf("contact", browserName));
+  const state = await pendingIdentify(page);
+  const tab = await shopTab(context, `${ACCOUNT_HTTPS}/account`);
+  await signInByEmail(tab, account);
+  await tab.waitForURL(`${ACCOUNT_HTTPS}/account`);
+  await tab.close();
+  const issued = await context.request.get(
+    `${ACCOUNT_HTTPS}/identify?state=${state}&origin=${FRESH_HTTPS}`,
+    { maxRedirects: 0, headers: NAVIGATE },
+  );
+  expect(issued.status(), "the account origin issued a code").toBe(303);
+  const exact = new URL(issued.headers().location ?? "");
+  const code = exact.searchParams.get("code") ?? "";
+  const cap = await cookieValue(context, CART);
+  const unconsumed = () =>
+    sql(`SELECT (SELECT count(*) FROM checkout_identities
+                   WHERE state_hash = ${hashOf(state)} AND consumed_at IS NULL)
+         || ',' || (SELECT count(*) FROM account_codes
+                   WHERE code_hash = ${hashOf(code)} AND consumed_at IS NULL)`);
+  expect(unconsumed(), "the identify state and the account code wait").toBe("1,1");
+
+  const other = `${state.slice(0, -1)}${state.endsWith("A") ? "B" : "A"}`;
+  for (const [label, query] of [
+    ["an extra parameter", `state=${state}&code=${code}&next=%2F`],
+    ["a duplicate code", `state=${state}&code=${code}&code=${code}`],
+    ["a duplicate state", `state=${state}&state=${state}&code=${code}`],
+    ["another state", `state=${other}&code=${code}`],
+  ]) {
+    await page.goto(`${FRESH_HTTPS}/checkout/identify?${query}`);
+    await page.waitForURL(`${FRESH_HTTPS}/checkout?error=identify_failed`);
+    expect(await cookieValue(context, CART), `${label}: no rotation`).toBe(cap);
+    expect(await cookieValue(context, IDT), `${label}: the identify cookie stays`).toBe(state);
+    expect(unconsumed(), `${label}: nothing consumed`).toBe("1,1");
+  }
+
+  await page.goto(exact.href);
+  await page.waitForURL(`${FRESH_HTTPS}/checkout`);
+  expect(await cookieValue(context, CART), "the exact callback rotated the capability").not.toBe(
+    cap,
+  );
+  expect(await cookieValue(context, IDT)).toBeUndefined();
+  expect(unconsumed(), "and consumed the state and the code").toBe("0,0");
+  await context.close();
 });
 
 for (const signedInto of ["the expected account", "another account", "no account"] as const) {
@@ -420,7 +471,7 @@ test("after identify, Back and the account history neither expose a code nor lin
   expect(await cookieValue(context, CART), "replaying the state rotated nothing").toBe(cap);
   const state = new URLSearchParams(next.split("?")[1]).get("state") ?? "";
   expect(
-    sql(`SELECT count(*) FROM checkout_identities WHERE state_hash = ${stateHash(state)}
+    sql(`SELECT count(*) FROM checkout_identities WHERE state_hash = ${hashOf(state)}
            AND consumed_at IS NOT NULL`),
     "the state was consumed once",
   ).toBe("1");
