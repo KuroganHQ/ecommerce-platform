@@ -13,6 +13,7 @@ import { checkoutApi, grantPageToken, messages, pageToken, shopUrl } from "../..
 // grant's, and the edge forwards only that credential (C4/C5).
 const api = checkoutApi(Astro.request);
 const ref = Astro.params.token ?? "";
+const sameOrigin = /^[0-9a-f]{8}-/.test(ref);
 const [shop, order] = await Promise.all([api.shop(), api.order(ref)]);
 const m = shop?.messages ?? {};
 const documents = order ? await api.orderDocuments(ref) : null;
@@ -52,6 +53,7 @@ const due = order?.payment.expires_at
   withdrawalLabel={t(m, "withdraw.title")}
   wide
   pageToken={token}
+  platformLinks={!sameOrigin}
 >
   {
     !order ? (
@@ -82,7 +84,7 @@ const due = order?.payment.expires_at
         {bank && <BankTransfer bank={bank} due={due} m={m} />}
         <OrderDetails order={order} m={m} />
         <OrderDocuments documents={documents} m={m} locale={shop?.locale ?? "cs"} />
-        {(order.status === "shipped" || order.status === "delivered") && <a href="/withdraw" class="text-identity-ink underline">{t(m, "withdraw.link")}</a>}
+        {!sameOrigin && (order.status === "shipped" || order.status === "delivered") && <a href="/withdraw" class="text-identity-ink underline">{t(m, "withdraw.link")}</a>}
       </div>
     )
   }

@@ -186,7 +186,7 @@ test("same-origin bank transfer with a Packeta pickup point: instructions on the
   const instructions = page.getByTestId("bank-transfer");
   await expect(instructions).toBeVisible();
   await expect(instructions.locator("svg")).toHaveCount(1);
-  await expect(page.getByTestId("pickup-point")).toContainText(/Trafika Vinohrady/);
+  await expect(page.getByTestId("order-pickup-point")).toContainText("Trafika Vinohrady");
   expect(violations).toEqual([]);
   await context.close();
 });
