@@ -1,0 +1,47 @@
+---
+import { t } from "@platform/storefront-sdk/format";
+import Checkout from "../../layouts/Checkout.astro";
+import { checkoutApi, grantPageToken, shopUrl } from "../../lib/api";
+import { Button } from "../../ui.tsx";
+
+// Same-origin abandoned-cart unsubscribe link (SHOP-54 C1/C4): opening it changes nothing; the
+// button unsubscribes, so mail scanners that follow links unsubscribe nobody.
+const shop = await checkoutApi(Astro.request).shop();
+const pageToken = grantPageToken(Astro.request);
+const valid = Boolean(pageToken) && Astro.url.searchParams.get("link") !== "invalid";
+const error = Astro.url.searchParams.get("error") === "1";
+const m = shop?.messages ?? {};
+---
+
+<Checkout
+  title={t(m, "flows.unsubscribe_title")}
+  shopName={shop?.name ?? ""}
+  shopUrl={shopUrl(Astro.url)}
+  lang={shop?.locale ?? "cs"}
+  accountLabel={t(m, "account.nav")}
+  accountUrl={shop?.account_url}
+  platformLinks={!pageToken}
+>
+  <div class="grid max-w-xl gap-4">
+    <h1 class="font-display text-2xl font-bold">{t(m, "flows.unsubscribe_title")}</h1>
+    {
+      valid ? (
+        <form method="post" action="/flows/unsubscribe" class="grid justify-items-start gap-4">
+          <p>{t(m, "flows.unsubscribe_intro")}</p>
+          {error && (
+            <p role="alert" class="font-medium text-error-700">
+              {t(m, "flows.error")}
+            </p>
+          )}
+          <input type="hidden" name="_pt" value={pageToken} />
+          <Button type="submit" variant="primary">
+            {t(m, "flows.unsubscribe_button")}
+          </Button>
+        </form>
+      ) : (
+        <p role="alert">{t(m, "flows.restore_invalid")}</p>
+      )
+    }
+    <a href={shopUrl(Astro.url)} class="text-sm text-identity-ink underline">{t(m, "nl.back")}</a>
+  </div>
+</Checkout>

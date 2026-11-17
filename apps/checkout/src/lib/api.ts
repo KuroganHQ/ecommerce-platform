@@ -64,6 +64,10 @@ export function checkoutApi(request: Request) {
         : Promise.resolve(null),
     withdrawalByGrant: () => get<WithdrawalForm>("/link-grants/withdrawal"),
     reviewByGrant: () => get<ReviewInvitation>("/link-grants/review"),
+    newsletterConfirmationByGrant: () =>
+      get<NewsletterConfirmation>("/link-grants/newsletter-confirmation"),
+    newsletterPreferencesByGrant: () =>
+      get<NewsletterPreferences>("/link-grants/newsletter-preferences"),
     myWithdrawalForm: (id: string) =>
       /^[0-9a-f-]{36}$/.test(id)
         ? get<WithdrawalForm>(`/customer/orders/${id}/withdrawal`)

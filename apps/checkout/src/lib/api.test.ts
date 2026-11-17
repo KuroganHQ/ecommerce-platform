@@ -52,6 +52,8 @@ test("expired withdrawal links return null; upstream failures are not presented 
 test.each([
   ["withdrawalByGrant", "/link-grants/withdrawal"],
   ["reviewByGrant", "/link-grants/review"],
+  ["newsletterConfirmationByGrant", "/link-grants/newsletter-confirmation"],
+  ["newsletterPreferencesByGrant", "/link-grants/newsletter-preferences"],
 ] as const)("%s reads by the context's grant, with no link in the path", async (method, path) => {
   binding.fetch.mockResolvedValueOnce(Response.json({ ok: true }));
   await expect(api[method]()).resolves.toEqual({ ok: true });

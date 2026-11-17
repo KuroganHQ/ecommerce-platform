@@ -1,17 +1,24 @@
 /** WP19 watchdog through the shop edge, checkout-origin confirmation and inventory outbox. */
 import { expect, type Page, test } from "@playwright/test";
 import { expectAccessible, run, signInOwner, sql } from "../admin/support";
+import { tabTo } from "../keyboard";
 import { rateHeaders, testContext } from "../rate-client";
 import {
   acceptAndPlace,
   CZ,
   checkoutOf,
   choosePickupPoint,
+  expectGrantPage,
+  FRESH_HTTPS,
   fakePay,
   fillContactAndAddress,
+  linkToken,
   mail,
   newPage,
   order,
+  postForm,
+  redirectLocations,
+  securityContext,
   toCheckout,
 } from "./support";
 
@@ -531,4 +538,158 @@ test("price-drop watch form works without JavaScript and asks for confirmation",
   await scripted.goto(link);
   await expectAccessible(scripted, "watch confirmation");
   await scripted.context().close();
+});
+
+const watchStatus = (email: string) =>
+  sql(`SELECT status FROM flow_watches WHERE email='${email}'`);
+
+test("same-origin watch links: emailed and stock links become grants, forms post _pt, single use", async ({
+  browser,
+}) => {
+  const tenant = sql("SELECT id FROM platform.tenants WHERE slug='demo'");
+  const market = sql(`SELECT id FROM markets WHERE tenant_id='${tenant}' AND is_default`);
+  const variant = sql(`SELECT v.id FROM variants v JOIN product_translations t
+    ON t.product_id=v.product_id WHERE t.slug='cepice-s-bambuli' AND t.locale='cs'
+    ORDER BY v.position LIMIT 1`);
+  const buyer = await securityContext(browser, { viewport: { width: 390, height: 844 } });
+  const page = await buyer.newPage();
+  const redirects = redirectLocations(page);
+
+  const priceEmail = `so-price-${run}@example.test`;
+  const subscribed = await page.request.post(`${FRESH_HTTPS}/_p/watch`, {
+    headers: { origin: FRESH_HTTPS, ...rateHeaders(page) },
+    data: { variant_id: variant, kind: "price_drop", email: priceEmail },
+  });
+  expect(subscribed.status()).toBe(202);
+  const mailed = await mail(priceEmail, "Potvrďte upozornění na produkt");
+  const token = /\/watch\/confirm\?token=([0-9a-f]{64})/.exec(mailed.Text)?.[1] ?? "";
+  expect(token, "emailed confirmation token").toMatch(/^[0-9a-f]{64}$/);
+  const link = `${FRESH_HTTPS}/watch/confirm?token=${token}`;
+
+  await page.goto(link);
+  await page.waitForURL(`${FRESH_HTTPS}/watch/confirm`);
+  const confirm = page.getByRole("button", { name: "Potvrdit hlídání" });
+  await expectGrantPage(page, token, redirects, confirm, "same-origin watch confirmation");
+  expect(watchStatus(priceEmail), "opening the link confirms nothing").toBe("pending");
+  await tabTo(page, confirm);
+  expect(await postForm(page, "/watch/confirm", () => page.keyboard.press("Enter"))).toBe(
+    "/watch/confirm?done=1",
+  );
+  await expect(page.getByRole("status")).toContainText("Hlídání je potvrzené.");
+  expect(watchStatus(priceEmail)).toBe("confirmed");
+  await page.goto(link);
+  await page.waitForURL(`${FRESH_HTTPS}/watch/confirm?link=invalid`);
+  await expect(page.getByRole("alert")).toContainText("Odkaz už neplatí");
+
+  const stockEmail = `so-stock-${run}@example.test`;
+  const stockConfirm = linkToken();
+  const stockCancel = linkToken();
+  sql(`INSERT INTO flow_watches (tenant_id, market_id, variant_id, kind, email, locale,
+      confirm_hash, unsubscribe_hash, confirm_expires_at)
+    VALUES ('${tenant}', '${market}', '${variant}', 'back_in_stock', '${stockEmail}', 'cs',
+      '\\x${stockConfirm.hash}'::bytea, '\\x${stockCancel.hash}'::bytea, now() + interval '1 day')`);
+  await page.goto(`${FRESH_HTTPS}/watch/confirm?token=${stockConfirm.token}`);
+  await page.waitForURL(`${FRESH_HTTPS}/watch/confirm`);
+  expect(await postForm(page, "/watch/confirm", () => confirm.click())).toBe(
+    "/watch/confirm?done=1",
+  );
+  expect(watchStatus(stockEmail)).toBe("confirmed");
+
+  await page.goto(`${FRESH_HTTPS}/watch/unsubscribe?token=${stockCancel.token}`);
+  await page.waitForURL(`${FRESH_HTTPS}/watch/unsubscribe`);
+  await expect(page.getByRole("heading", { name: "Zrušit hlídání" })).toBeVisible();
+  const cancel = page.getByRole("button", { name: "Zrušit hlídání" });
+  await expectGrantPage(page, stockCancel.token, redirects, cancel, "same-origin watch cancel");
+  expect(watchStatus(stockEmail), "opening the cancel link changes nothing").toBe("confirmed");
+
+  const other = await buyer.newPage();
+  const otherConfirm = linkToken();
+  sql(`INSERT INTO flow_watches (tenant_id, market_id, variant_id, kind, email, locale,
+      confirm_hash, unsubscribe_hash, confirm_expires_at)
+    VALUES ('${tenant}', '${market}', '${variant}', 'back_in_stock', 'so-other-${run}@example.test',
+      'cs', '\\x${otherConfirm.hash}'::bytea, '\\x${linkToken().hash}'::bytea,
+      now() + interval '1 day')`);
+  await other.goto(`${FRESH_HTTPS}/watch/confirm?token=${otherConfirm.token}`);
+  await other.waitForURL(`${FRESH_HTTPS}/watch/confirm`);
+  await other.close();
+  expect(
+    await postForm(page, "/watch/unsubscribe", () => cancel.click()),
+    "a stale _pt reloads the page",
+  ).toBe("/watch/unsubscribe");
+  expect(watchStatus(stockEmail), "the stale form acted on nothing").toBe("confirmed");
+
+  await page.goto(`${FRESH_HTTPS}/watch/unsubscribe?token=${stockCancel.token}`);
+  await page.waitForURL(`${FRESH_HTTPS}/watch/unsubscribe`);
+  await tabTo(page, cancel);
+  expect(await postForm(page, "/watch/unsubscribe", () => page.keyboard.press("Enter"))).toBe(
+    "/watch/unsubscribed",
+  );
+  await expect(page.getByRole("heading", { name: "Upozornění zrušeno" })).toBeVisible();
+  expect(watchStatus(stockEmail)).toBe("unsubscribed");
+  await buyer.close();
+});
+
+test("same-origin cart links: unsubscribe is a form action, restore works once", async ({
+  browser,
+}) => {
+  const tenant = sql("SELECT id FROM platform.tenants WHERE slug='demo'");
+  const market = sql(`SELECT id FROM markets WHERE tenant_id='${tenant}' AND is_default`);
+  const variant = sql(`SELECT v.id FROM variants v JOIN product_translations t
+    ON t.product_id=v.product_id WHERE t.slug='tricko-henley' AND t.locale='cs'
+    ORDER BY v.position LIMIT 1`);
+  const email = `so-cart-${run}@example.test`;
+  const buyer = await securityContext(browser, { viewport: { width: 390, height: 844 } });
+  const page = await buyer.newPage();
+  const redirects = redirectLocations(page);
+
+  const stop = linkToken();
+  sql(`INSERT INTO flow_unsubscribe_tokens (tenant_id, token_hash, email)
+    VALUES ('${tenant}', '\\x${stop.hash}'::bytea, '${email}')`);
+  const used = () =>
+    sql(`SELECT used_at IS NOT NULL FROM flow_unsubscribe_tokens
+      WHERE token_hash = '\\x${stop.hash}'::bytea`);
+  await page.goto(`${FRESH_HTTPS}/flows/unsubscribe?token=${stop.token}`);
+  await page.waitForURL(`${FRESH_HTTPS}/flows/unsubscribe`);
+  await expect(page.getByRole("heading", { name: "Odhlásit připomínky košíku" })).toBeVisible();
+  const unsubscribe = page.getByRole("button", { name: "Odhlásit", exact: true });
+  await expectGrantPage(page, stop.token, redirects, unsubscribe, "same-origin cart unsubscribe");
+  expect(used(), "opening the link unsubscribes nobody").toBe("f");
+  await tabTo(page, unsubscribe);
+  expect(await postForm(page, "/flows/unsubscribe", () => page.keyboard.press("Enter"))).toBe(
+    "/flows/unsubscribed",
+  );
+  await expect(page.getByRole("heading", { name: "Odhlášeno" })).toBeVisible();
+  expect(used()).toBe("t");
+
+  const cart =
+    sql(`INSERT INTO carts(tenant_id, market_id, email, locale, currency, last_activity_at)
+    VALUES ('${tenant}', '${market}', '${email}', 'cs', 'CZK', now() - interval '2 hours')
+    RETURNING id`)
+      .split("\n")[0]
+      ?.trim();
+  sql(`INSERT INTO cart_lines(tenant_id, cart_id, variant_id, quantity)
+    VALUES ('${tenant}', '${cart}', '${variant}', 2)`);
+  const restore = linkToken();
+  sql(`INSERT INTO flow_restore_tokens (tenant_id, token_hash, cart_id, expires_at)
+    VALUES ('${tenant}', '\\x${restore.hash}'::bytea, '${cart}', now() + interval '1 day')`);
+  const link = `${FRESH_HTTPS}/restore-cart?token=${restore.token}`;
+  await page.goto(link);
+  await page.waitForURL(`${FRESH_HTTPS}/restore-cart`);
+  const go = page.getByRole("button", { name: "Pokračovat k pokladně" });
+  await expectGrantPage(page, restore.token, redirects, go, "same-origin cart restore");
+  await tabTo(page, go);
+  expect(await postForm(page, "/restore-cart", () => page.keyboard.press("Enter"))).toBe(
+    "/checkout",
+  );
+  await expect(page.getByRole("heading", { name: "Pokladna" })).toBeVisible();
+  expect(
+    sql(`SELECT count(*) FROM carts c JOIN cart_lines l ON l.cart_id = c.id
+      WHERE c.tenant_id = '${tenant}' AND c.id <> '${cart}' AND c.email IS NULL
+        AND l.variant_id = '${variant}' AND l.quantity = 2
+        AND c.created_at > now() - interval '5 minutes'`),
+  ).not.toBe("0");
+  await page.goto(link);
+  await page.waitForURL(`${FRESH_HTTPS}/restore-cart?link=invalid`);
+  await expect(page.getByRole("alert")).toContainText("Odkaz už neplatí");
+  await buyer.close();
 });
