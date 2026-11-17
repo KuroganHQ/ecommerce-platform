@@ -296,7 +296,11 @@ pub(crate) async fn converted(
     ctx: &Context,
     token: &str,
 ) -> Result<CartRef, Error> {
-    converted_by(tx, ctx, token, Reach::Receipt).await
+    let p = enter(tx, ctx).await?;
+    if p.mode != CheckoutMode::SameOrigin {
+        return Err(Error::NotFound);
+    }
+    Ok(guard(tx, ctx, &p, token, Reach::Receipt).await?.0)
 }
 
 /// The converted checkout behind its current capability only: a capability a rotation
@@ -306,20 +310,8 @@ pub(crate) async fn placed_by(
     ctx: &Context,
     token: &str,
 ) -> Result<CartRef, Error> {
-    converted_by(tx, ctx, token, Reach::Order).await
-}
-
-async fn converted_by(
-    tx: &mut TenantTx,
-    ctx: &Context,
-    token: &str,
-    reach: Reach,
-) -> Result<CartRef, Error> {
     let p = enter(tx, ctx).await?;
-    if p.mode != CheckoutMode::SameOrigin {
-        return Err(Error::NotFound);
-    }
-    Ok(guard(tx, ctx, &p, token, reach).await?.0)
+    Ok(guard(tx, ctx, &p, token, Reach::Order).await?.0)
 }
 
 async fn lock_source_before_checkout(tx: &mut TenantTx, token: &str) -> Result<(), Error> {

@@ -385,31 +385,6 @@ pub async fn link_guest_orders(tx: &mut TenantTx, customer_id: Uuid) -> Result<u
     .rows_affected())
 }
 
-/// Whether the requester may pay the order (new attempts, provider init). The order token is
-/// a read-only capability (A4), so paying needs more: the checkout cart capability of the cart
-/// the order was placed from (the same browser), or the session of the order's customer.
-pub async fn may_pay(
-    tx: &mut TenantTx,
-    order_id: Uuid,
-    cart_token: Option<&str>,
-    customer_id: Option<Uuid>,
-) -> Result<bool, Error> {
-    let r = sqlx::query!(
-        "SELECT o.customer_id, c.checkout_token_hash FROM orders o JOIN carts c ON c.id = o.cart_id
-         WHERE o.id = $1",
-        order_id
-    )
-    .fetch_optional(&mut **tx)
-    .await?
-    .ok_or(Error::NotFound)?;
-    let by_customer = customer_id.is_some() && r.customer_id == customer_id;
-    let by_cart = cart_token.is_some_and(|t| {
-        capability::well_formed(t)
-            && r.checkout_token_hash.as_deref() == Some(&capability::hash(t)[..])
-    });
-    Ok(by_customer || by_cart)
-}
-
 /// The customer an order belongs to (`None` for a guest order), `404` for unknown orders.
 pub async fn customer_of(tx: &mut TenantTx, id: Uuid) -> Result<Option<Uuid>, Error> {
     sqlx::query_scalar!("SELECT customer_id FROM orders WHERE id = $1", id)
