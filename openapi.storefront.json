@@ -4855,7 +4855,7 @@
           "storefront"
         ],
         "summary": "Restores the grant's abandoned cart as a new shop cart (lines and coupons only), consumes\nthe link and revokes the grant. The shop capability is for the edge's `cart` cookie.",
-        "operationId": "restore_cart",
+        "operationId": "restore_cart_by_grant",
         "parameters": [
           {
             "name": "X-Storefront-Token",

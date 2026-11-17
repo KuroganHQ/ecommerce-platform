@@ -891,7 +891,7 @@ export interface paths {
          * Restores the grant's abandoned cart as a new shop cart (lines and coupons only), consumes
          *     the link and revokes the grant. The shop capability is for the edge's `cart` cookie.
          */
-        post: operations["restore_cart"];
+        post: operations["restore_cart_by_grant"];
         delete?: never;
         options?: never;
         head?: never;
@@ -5581,7 +5581,7 @@ export interface operations {
             };
         };
     };
-    restore_cart: {
+    restore_cart_by_grant: {
         parameters: {
             query?: never;
             header: {

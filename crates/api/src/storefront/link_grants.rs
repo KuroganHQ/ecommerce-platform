@@ -41,7 +41,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
         .routes(routes!(confirm_watch))
         .routes(routes!(unsubscribe_watch))
         .routes(routes!(unsubscribe_flow))
-        .routes(routes!(restore_cart))
+        .routes(routes!(restore_cart_by_grant))
 }
 
 #[derive(IntoParams)]
@@ -525,7 +525,7 @@ async fn unsubscribe_flow(
         (status = 404, description = "no restore grant, or its link was used or expired", body = platform::Problem, content_type = "application/problem+json"),
     )
 )]
-async fn restore_cart(
+async fn restore_cart_by_grant(
     shopper: Shopper,
     State(s): State<AppState>,
     headers: HeaderMap,
