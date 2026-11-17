@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT $2::timestamptz AS \"at!\" FROM flow_watches\n                 WHERE unsubscribe_hash = $1 AND status <> 'unsubscribed'",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "at!",
+        "type_info": "Timestamptz",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Bytea",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "e93c0727ce861602a9eaa0c37dc1b1e7bfb79de63af4b7357e0961183a4b2a9d"
+}

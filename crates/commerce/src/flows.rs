@@ -13,9 +13,11 @@ use utoipa::ToSchema;
 use uuid::Uuid;
 
 use crate::capability;
+use crate::cart;
 use crate::consent::{self, ConsentPurpose, Subject};
+use crate::link_access::{self, Scope};
 use crate::notifications::{self, Brand, Email, Template};
-use crate::storefront::{self, PublicUrls};
+use crate::storefront::{self, Context, PublicUrls};
 
 pub const EVENT_JOB: &str = "flows.event";
 pub const TICK_JOB: &str = "flows.tick";
@@ -537,8 +539,26 @@ pub async fn unsubscribe_cart(tx: &mut TenantTx, token: &str) -> Result<bool, Er
     if !capability::well_formed(token) {
         return Ok(false);
     }
+    unsubscribe_cart_link(tx, &capability::hash(token)).await
+}
+
+/// The explicit form action of a same-origin flow opt-out page; revokes the grant.
+pub async fn unsubscribe_cart_by_grant(
+    tx: &mut TenantTx,
+    ctx: &Context,
+    grant: &str,
+) -> Result<(), Error> {
+    let link = link_access::complete_link(tx, ctx, grant, Scope::FlowUnsubscribe).await?;
+    found(unsubscribe_cart_link(tx, &link).await?)
+}
+
+fn found(done: bool) -> Result<(), Error> {
+    if done { Ok(()) } else { Err(Error::NotFound) }
+}
+
+async fn unsubscribe_cart_link(tx: &mut TenantTx, link: &[u8]) -> Result<bool, Error> {
     let email: Option<String> = sqlx::query_scalar("UPDATE flow_unsubscribe_tokens SET used_at=now() WHERE token_hash=$1 AND used_at IS NULL RETURNING email")
-        .bind(capability::hash(token)).fetch_optional(&mut **tx).await?;
+        .bind(link).fetch_optional(&mut **tx).await?;
     let Some(email) = email else {
         return Ok(false);
     };
@@ -893,9 +913,26 @@ pub async fn confirm_watch(
     if !capability::well_formed(token) {
         return Ok(false);
     }
+    confirm_watch_link(tx, &capability::hash(token), now).await
+}
+
+pub async fn confirm_watch_by_grant(
+    tx: &mut TenantTx,
+    ctx: &Context,
+    grant: &str,
+) -> Result<(), Error> {
+    let link = link_access::complete_link(tx, ctx, grant, Scope::WatchConfirmation).await?;
+    found(confirm_watch_link(tx, &link, ctx.now).await?)
+}
+
+async fn confirm_watch_link(
+    tx: &mut TenantTx,
+    link: &[u8],
+    now: DateTime<Utc>,
+) -> Result<bool, Error> {
     let updated = sqlx::query("UPDATE flow_watches SET status='confirmed',confirm_hash=NULL,confirm_expires_at=NULL,confirmed_at=$2,updated_at=now()
         WHERE confirm_hash=$1 AND status='pending' AND confirm_expires_at>$2")
-        .bind(capability::hash(token)).bind(now).execute(&mut **tx).await?.rows_affected();
+        .bind(link).bind(now).execute(&mut **tx).await?.rows_affected();
     Ok(updated == 1)
 }
 
@@ -903,10 +940,48 @@ pub async fn unsubscribe_watch(tx: &mut TenantTx, token: &str) -> Result<bool, E
     if !capability::well_formed(token) {
         return Ok(false);
     }
+    unsubscribe_watch_link(tx, &capability::hash(token)).await
+}
+
+pub async fn unsubscribe_watch_by_grant(
+    tx: &mut TenantTx,
+    ctx: &Context,
+    grant: &str,
+) -> Result<(), Error> {
+    let link = link_access::complete_link(tx, ctx, grant, Scope::WatchUnsubscribe).await?;
+    found(unsubscribe_watch_link(tx, &link).await?)
+}
+
+async fn unsubscribe_watch_link(tx: &mut TenantTx, link: &[u8]) -> Result<bool, Error> {
     let updated = sqlx::query("UPDATE flow_watches SET status='unsubscribed',confirm_hash=NULL,confirm_expires_at=NULL,updated_at=now()
         WHERE unsubscribe_hash=$1 AND status <> 'unsubscribed'")
-        .bind(capability::hash(token)).execute(&mut **tx).await?.rows_affected();
+        .bind(link).execute(&mut **tx).await?.rows_affected();
     Ok(updated == 1)
+}
+
+/// Same-origin restore (C5): consumes the restore link and revokes its grant, then copies the
+/// abandoned cart's lines and coupons into a new shop cart and returns that cart's shop
+/// capability. Contact, addresses, notes and customer stay on the abandoned cart.
+pub async fn restore_by_grant(
+    tx: &mut TenantTx,
+    ctx: &Context,
+    grant: &str,
+) -> Result<String, Error> {
+    let link = link_access::complete_link(tx, ctx, grant, Scope::RestoreCart).await?;
+    let source: Uuid = sqlx::query_scalar(
+        "UPDATE flow_restore_tokens SET used_at = now()
+         WHERE token_hash = $1 AND used_at IS NULL AND expires_at > now()
+           AND cart_id IN (SELECT id FROM carts WHERE market_id = $2 AND status = 'open')
+         RETURNING cart_id",
+    )
+    .bind(&link)
+    .bind(ctx.market.id)
+    .fetch_optional(&mut **tx)
+    .await?
+    .ok_or(Error::NotFound)?;
+    let (restored, token) = cart::create(tx, ctx).await?;
+    cart::copy_contents(tx, source, restored).await?;
+    Ok(token)
 }
 
 /// Consume a committed inventory or price transition. The before/after values come from the

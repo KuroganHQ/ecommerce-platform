@@ -18,6 +18,7 @@ use uuid::Uuid;
 
 use crate::capability;
 use crate::consent::{self, ConsentPurpose, Subject};
+use crate::link_access::{self, Scope};
 use crate::markets::invalid;
 use crate::notifications::{self, Brand, Email, Template};
 use crate::storefront::Context;
@@ -246,10 +247,24 @@ pub async fn confirmation(tx: &mut TenantTx, token: &str) -> Result<Confirmation
     if !capability::well_formed(token) {
         return Err(Error::NotFound);
     }
+    confirmation_by_link(tx, &capability::hash(token)).await
+}
+
+/// As [`confirmation`], for the confirmation link behind a same-origin link grant.
+pub async fn confirmation_by_grant(
+    tx: &mut TenantTx,
+    ctx: &Context,
+    grant: &str,
+) -> Result<Confirmation, Error> {
+    let link = link_access::read_link(tx, ctx, grant, Scope::NewsletterConfirmation).await?;
+    confirmation_by_link(tx, &link).await
+}
+
+async fn confirmation_by_link(tx: &mut TenantTx, link: &[u8]) -> Result<Confirmation, Error> {
     let email = sqlx::query_scalar!(
         "SELECT email FROM subscribers
          WHERE confirm_token_hash = $1 AND confirm_expires_at > now() AND status = 'pending'",
-        capability::hash(token)
+        link
     )
     .fetch_optional(&mut **tx)
     .await?
@@ -270,6 +285,26 @@ pub async fn confirm(
     if !capability::well_formed(token) {
         return Err(Error::NotFound);
     }
+    confirm_link(tx, &capability::hash(token), ip_hash).await
+}
+
+/// As [`confirm`], for the link behind a same-origin grant, which it revokes in the same
+/// transaction.
+pub async fn confirm_by_grant(
+    tx: &mut TenantTx,
+    ctx: &Context,
+    grant: &str,
+    ip_hash: Option<&[u8]>,
+) -> Result<Subscriber, Error> {
+    let link = link_access::complete_link(tx, ctx, grant, Scope::NewsletterConfirmation).await?;
+    confirm_link(tx, &link, ip_hash).await
+}
+
+async fn confirm_link(
+    tx: &mut TenantTx,
+    link: &[u8],
+    ip_hash: Option<&[u8]>,
+) -> Result<Subscriber, Error> {
     let row = sqlx::query_as!(
         Row,
         "UPDATE subscribers s SET status = 'subscribed', confirmed_at = now(),
@@ -281,7 +316,7 @@ pub async fn confirm(
          WHERE confirm_token_hash = $1 AND confirm_expires_at > now() AND status = 'pending'
          RETURNING id, email, status, locale, market_id, customer_id, requested_at,
                    confirmed_at, text_version, source, unsubscribed_at, created_at",
-        capability::hash(token),
+        link,
         ip_hash
     )
     .fetch_optional(&mut **tx)

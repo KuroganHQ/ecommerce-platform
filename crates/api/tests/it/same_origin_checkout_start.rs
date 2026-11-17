@@ -15,6 +15,7 @@ use crate::common::*;
 mod checkout_identity;
 mod checkout_placement_identity;
 mod link_grants;
+mod marketing_links;
 mod pii_rotation;
 mod placement_recovery;
 

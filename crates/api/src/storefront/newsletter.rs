@@ -10,6 +10,7 @@ use axum::extract::rejection::QueryRejection;
 use axum::extract::{Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
+use commerce::flows;
 use commerce::marketing::campaigns::{self, Preferences};
 use commerce::marketing::subscribers::{self, Confirmation};
 use platform::Error;
@@ -31,6 +32,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
         .routes(routes!(unsubscribe))
         .routes(routes!(resubscribe))
         .routes(routes!(click))
+        .routes(routes!(one_click))
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -281,4 +283,40 @@ async fn click(
     })
     .await?;
     Ok(no_store(Json(ClickTarget { url }).into_response()))
+}
+
+/// RFC 8058 one-click unsubscribe (decision C11) for a campaign or an abandoned-cart
+/// reminder: the bearer token alone authorizes it, whatever else the request carries.
+#[utoipa::path(
+    post,
+    path = "/storefront/v1/unsubscribe",
+    tag = "storefront",
+    params(StorefrontHeaders),
+    request_body = NewsletterToken,
+    responses(
+        (status = 200, body = NewsletterStatus),
+        (status = 404, body = platform::Problem, content_type = "application/problem+json"),
+    )
+)]
+async fn one_click(
+    shopper: Shopper,
+    State(s): State<AppState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<Response, Error> {
+    let input: NewsletterToken = parse_json(&body)?;
+    with_ctx(&s, &shopper, async |tx, _| {
+        let ip = ip_hash(tx, &headers).await?;
+        match campaigns::unsubscribe(tx, &input.token, ip.as_deref()).await {
+            Err(Error::NotFound) if flows::unsubscribe_cart(tx, &input.token).await? => Ok(()),
+            r => r.map(drop),
+        }
+    })
+    .await?;
+    Ok(no_store(
+        Json(NewsletterStatus {
+            status: "unsubscribed".into(),
+        })
+        .into_response(),
+    ))
 }

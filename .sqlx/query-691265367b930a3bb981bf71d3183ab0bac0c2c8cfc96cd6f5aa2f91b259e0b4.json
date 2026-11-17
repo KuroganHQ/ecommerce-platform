@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT confirm_expires_at AS \"at!\" FROM subscribers\n                 WHERE confirm_token_hash = $1 AND status = 'pending'\n                   AND confirm_expires_at > now()",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "at!",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "subscribers",
+            "name": "confirm_expires_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Bytea"
+      ]
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "691265367b930a3bb981bf71d3183ab0bac0c2c8cfc96cd6f5aa2f91b259e0b4"
+}

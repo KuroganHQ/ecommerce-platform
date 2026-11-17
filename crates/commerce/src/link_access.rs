@@ -5,7 +5,7 @@
 //! link, is revoked when the browser opens a newer link and, for single-use actions, when the
 //! action completes in the caller's transaction.
 
-use chrono::{Duration, Utc};
+use chrono::{DateTime, Duration, Utc};
 use platform::Error;
 use platform::db::TenantTx;
 use uuid::Uuid;
@@ -17,6 +17,7 @@ use crate::tenancy::CheckoutMode;
 
 pub const IDLE_MINUTES: i64 = 30;
 const ANONYMOUS_HOURS: i64 = 24;
+const LINK_HOURS: i64 = 24;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Scope {
@@ -25,6 +26,12 @@ pub enum Scope {
     WithdrawalRequest,
     Withdrawal,
     Review,
+    NewsletterConfirmation,
+    NewsletterPreferences,
+    WatchConfirmation,
+    WatchUnsubscribe,
+    FlowUnsubscribe,
+    RestoreCart,
 }
 
 impl Scope {
@@ -34,6 +41,12 @@ impl Scope {
             Scope::WithdrawalRequest => ("withdrawal_request", None),
             Scope::Withdrawal => ("withdrawal", None),
             Scope::Review => ("review", None),
+            Scope::NewsletterConfirmation => ("newsletter_confirmation", None),
+            Scope::NewsletterPreferences => ("newsletter_preferences", None),
+            Scope::WatchConfirmation => ("watch_confirmation", None),
+            Scope::WatchUnsubscribe => ("watch_unsubscribe", None),
+            Scope::FlowUnsubscribe => ("flow_unsubscribe", None),
+            Scope::RestoreCart => ("restore_cart", None),
         }
     }
 }
@@ -44,6 +57,8 @@ pub enum Source<'a> {
     WithdrawalForm,
     WithdrawalLink(&'a str),
     ReviewLink(&'a str),
+    /// A newsletter, watch, flow or restore-cart link for one of those scopes.
+    MarketingLink(Scope, &'a str),
 }
 
 #[derive(Debug)]
@@ -110,6 +125,13 @@ pub async fn exchange(
             .await?
             .ok_or(Error::NotFound)?;
             (Scope::Review, None, Some(hash), expires_at)
+        }
+        Source::MarketingLink(scope, token) => {
+            let hash = link(token)?;
+            let expires_at = marketing_link_expiry(tx, ctx, scope, &hash)
+                .await?
+                .ok_or(Error::NotFound)?;
+            (scope, None, Some(hash), expires_at)
         }
     };
     if let Some(previous) = previous.filter(|t| capability::well_formed(t)) {
@@ -236,6 +258,80 @@ async fn revoke(
     .fetch_optional(&mut **tx)
     .await?
     .ok_or(Error::NotFound)
+}
+
+/// When the live link behind `hash` expires; links without their own expiry give the grant
+/// [`LINK_HOURS`].
+async fn marketing_link_expiry(
+    tx: &mut TenantTx,
+    ctx: &Context,
+    scope: Scope,
+    hash: &[u8],
+) -> Result<Option<DateTime<Utc>>, Error> {
+    let cap = Utc::now() + Duration::hours(LINK_HOURS);
+    let found = match scope {
+        Scope::NewsletterConfirmation => {
+            sqlx::query_scalar!(
+                "SELECT confirm_expires_at AS \"at!\" FROM subscribers
+                 WHERE confirm_token_hash = $1 AND status = 'pending'
+                   AND confirm_expires_at > now()",
+                hash
+            )
+            .fetch_optional(&mut **tx)
+            .await?
+        }
+        Scope::NewsletterPreferences => {
+            sqlx::query_scalar!(
+                "SELECT $2::timestamptz AS \"at!\" FROM campaign_sends WHERE token_hash = $1",
+                hash,
+                cap
+            )
+            .fetch_optional(&mut **tx)
+            .await?
+        }
+        Scope::WatchConfirmation => {
+            sqlx::query_scalar!(
+                "SELECT confirm_expires_at AS \"at!\" FROM flow_watches
+                 WHERE confirm_hash = $1 AND status = 'pending' AND confirm_expires_at > now()",
+                hash
+            )
+            .fetch_optional(&mut **tx)
+            .await?
+        }
+        Scope::WatchUnsubscribe => {
+            sqlx::query_scalar!(
+                "SELECT $2::timestamptz AS \"at!\" FROM flow_watches
+                 WHERE unsubscribe_hash = $1 AND status <> 'unsubscribed'",
+                hash,
+                cap
+            )
+            .fetch_optional(&mut **tx)
+            .await?
+        }
+        Scope::FlowUnsubscribe => {
+            sqlx::query_scalar!(
+                "SELECT $2::timestamptz AS \"at!\" FROM flow_unsubscribe_tokens
+                 WHERE token_hash = $1 AND used_at IS NULL",
+                hash,
+                cap
+            )
+            .fetch_optional(&mut **tx)
+            .await?
+        }
+        Scope::RestoreCart => {
+            sqlx::query_scalar!(
+                "SELECT t.expires_at FROM flow_restore_tokens t JOIN carts c ON c.id = t.cart_id
+                 WHERE t.token_hash = $1 AND t.used_at IS NULL AND t.expires_at > now()
+                   AND c.status = 'open' AND c.market_id = $2",
+                hash,
+                ctx.market.id
+            )
+            .fetch_optional(&mut **tx)
+            .await?
+        }
+        Scope::OrderRead(_) | Scope::WithdrawalRequest | Scope::Withdrawal | Scope::Review => None,
+    };
+    Ok(found)
 }
 
 fn link(token: &str) -> Result<Vec<u8>, Error> {
