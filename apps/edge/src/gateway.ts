@@ -1992,31 +1992,11 @@ ${
     }
     if (p === "/_p/checkout" || p.startsWith("/_p/checkout/")) {
       const rest = p.slice("/_p/checkout".length);
-      return checkoutProxy(
-        site,
-        req,
-        "/checkout",
-        rest,
-        CHECKOUT_OPS,
-        host,
-        port,
-        clientIp,
-        cart,
-      );
+      return checkoutProxy(site, req, "/checkout", rest, CHECKOUT_OPS, host, port, clientIp, cart);
     }
     if (p.startsWith("/_p/orders/")) {
       const rest = p.slice("/_p/orders".length);
-      return checkoutProxy(
-        site,
-        req,
-        "/orders",
-        rest,
-        ORDER_OPS,
-        host,
-        port,
-        clientIp,
-        cart,
-      );
+      return checkoutProxy(site, req, "/orders", rest, ORDER_OPS, host, port, clientIp, cart);
     }
     if (p.startsWith("/_p/fake-pay/"))
       return fakePay(site, req, url, p.slice("/_p/fake-pay/".length), host, port);
