@@ -221,6 +221,27 @@ describe("same-origin platform pages answer top-level navigations only (C1)", ()
     });
   });
 
+  test("/consent renders the anonymous preferences page with the visitor's consent subject and no checkout credential", async () => {
+    const subject = "c".repeat(32);
+    const res = await get(`${FRESH}/consent`, {
+      ...NAVIGATE,
+      cookie: `${COOKIE}; __Secure-consent_id=${subject}`,
+    });
+    expect(res.status).toBe(200);
+    expectPlatformHeaders(res, "/consent");
+    expect(await res.text()).not.toContain("page-token");
+    expect(api.calls.map((c) => c.url)).toEqual(["http://api.test/storefront/v1/checkout"]);
+    expect(api.calls[0]?.headers["x-consent-subject"]).toBe(subject);
+    expect(api.calls[0]?.headers["x-cart-token"]).toBeUndefined();
+    const post = await get(
+      `${FRESH}/consent`,
+      { ...NAVIGATE, "sec-fetch-site": "same-origin", origin: FRESH, cookie: COOKIE },
+      { method: "POST", body: "x=1" },
+    );
+    expect(post.status).toBe(405);
+    expect(post.headers.get("allow")).toBe("GET, HEAD");
+  });
+
   test("POST to /checkout is 405 with the platform headers", async () => {
     const res = await get(
       `${FRESH}/checkout`,
