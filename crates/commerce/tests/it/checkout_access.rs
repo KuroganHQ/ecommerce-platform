@@ -198,8 +198,20 @@ pub(crate) async fn attest(runtime: &PgPool, origin: &ShopOrigin) {
     .unwrap();
 }
 
+pub(crate) async fn switch_mode(
+    runtime: &PgPool,
+    tenant: Uuid,
+    origin: &ShopOrigin,
+    mode: CheckoutMode,
+) -> Result<bool, Error> {
+    let mut tx = tenant_tx(runtime, tenant).await?;
+    let switched = checkout_access::switch_mode(&mut tx, "test", origin, mode).await?;
+    tx.commit().await?;
+    Ok(switched)
+}
+
 pub(crate) async fn switch(runtime: &PgPool, shop: &Shop, origin: &ShopOrigin, mode: CheckoutMode) {
-    let changed = checkout_access::switch_mode(runtime, shop.tenant, origin, mode)
+    let changed = switch_mode(runtime, shop.tenant, origin, mode)
         .await
         .unwrap();
     assert!(changed, "{} switched to {mode:?}", origin.as_str());
@@ -629,10 +641,7 @@ async fn switch_orders_against_inflight_requests(db: PgPool) {
     let switch_pid = pid(&mut switch_pool.acquire().await.unwrap()).await;
     let switch = tokio::spawn({
         let (tenant, origin) = (shop.tenant, shop.origin.clone());
-        async move {
-            checkout_access::switch_mode(&switch_pool, tenant, &origin, CheckoutMode::Isolated)
-                .await
-        }
+        async move { switch_mode(&switch_pool, tenant, &origin, CheckoutMode::Isolated).await }
     });
     blocked_by(&db, switch_pid, request_pid).await;
     let first = Details::Contact(contact("first@example.cz"));
@@ -796,12 +805,7 @@ async fn switch_does_not_wait_for_fenceless_cart_writers(db: PgPool) {
         .unwrap();
     let switched = tokio::time::timeout(
         Duration::from_secs(10),
-        checkout_access::switch_mode(
-            &runtime,
-            shop.tenant,
-            &shop.origin,
-            CheckoutMode::SameOrigin,
-        ),
+        switch_mode(&runtime, shop.tenant, &shop.origin, CheckoutMode::SameOrigin),
     )
     .await
     .expect("the switch waited for a cart row lock")

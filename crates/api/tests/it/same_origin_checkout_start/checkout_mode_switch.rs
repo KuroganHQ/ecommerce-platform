@@ -7,30 +7,9 @@ struct IsolatedOrder {
 }
 
 impl Ctx {
-    async fn handed_off(&self) -> String {
-        let shop_token = self.shop_cart().await;
-        let (status, body) = self
-            .call(
-                Call::post("/storefront/v1/cart/handoff", json!({})),
-                &shop_token,
-            )
-            .await;
-        assert_eq!(status, StatusCode::OK, "{body}");
-        let (status, body, _) = self
-            .edge
-            .call(Call::post(
-                "/storefront/v1/checkout/handoff",
-                json!({ "token": body["token"] }),
-            ))
-            .send(&self.s)
-            .await;
-        assert_eq!(status, StatusCode::OK, "{body}");
-        body["cart_token"].as_str().unwrap().to_owned()
-    }
-
     async fn isolated_order(&self) -> IsolatedOrder {
         let method = self.placeable().await;
-        let cart = self.handed_off().await;
+        let cart = self.handed_off_via(&self.edge, self.shop.variants[0]).await;
         for step in [
             Call::put(
                 "/storefront/v1/checkout/contact",

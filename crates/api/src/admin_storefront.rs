@@ -1,4 +1,5 @@
-//! Storefront Admin API: redirects (spec §7.5, §9.5) and the public storefront token (§5.5).
+//! Storefront Admin API: redirects (spec §7.5, §9.5), the public storefront token (§5.5) and
+//! the checkout policy of each shop origin (same-origin-checkout.md, C3 and Routing).
 
 use axum::Json;
 use axum::body::Bytes;
@@ -6,10 +7,11 @@ use axum::extract::rejection::{PathRejection, QueryRejection};
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::Response;
+use commerce::checkout_access::{self, ShopOrigin};
 use commerce::redirects::{self, Redirect, RedirectInput, RedirectPage};
-use commerce::tenancy::{self, Role};
+use commerce::tenancy::{self, CheckoutMode, CheckoutOrigin, Role};
 use platform::Error;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
@@ -29,6 +31,9 @@ pub fn routes() -> OpenApiRouter<AppState> {
         .routes(routes!(get_redirect, update_redirect, delete_redirect))
         .routes(routes!(get_token))
         .routes(routes!(rotate_token))
+        .routes(routes!(list_checkout_origins))
+        .routes(routes!(record_origin_history))
+        .routes(routes!(switch_checkout_mode))
 }
 
 /// Redirects, newest first.
@@ -221,4 +226,143 @@ async fn rotate_token(
     .await?;
     s.edge.tenant(staff.tenant_id).await;
     Ok(Json(StorefrontToken { token }))
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct CheckoutOriginList {
+    pub items: Vec<CheckoutOrigin>,
+}
+
+#[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct OriginHistoryInput {
+    /// The exact origin as browsers serialize it (`https://shop.example`).
+    pub origin: String,
+    /// The full-history attestation version the merchant accepted: required for a custom
+    /// domain, refused for a platform hostname.
+    #[serde(default)]
+    pub attestation_version: Option<i32>,
+}
+
+#[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CheckoutModeInput {
+    /// The exact origin as browsers serialize it (`https://shop.example`).
+    pub origin: String,
+    pub mode: CheckoutMode,
+}
+
+fn shop_origin(s: &str) -> Result<ShopOrigin, Error> {
+    ShopOrigin::parse(s).ok_or_else(|| Error::Validation {
+        code: "invalid_origin",
+        detail: "origin must be an exact browser origin such as https://shop.example".into(),
+    })
+}
+
+/// The checkout policy of each exact origin of the shop (owner/admin).
+#[utoipa::path(
+    get,
+    path = "/admin/v1/checkout-origins",
+    tag = "storefront-admin",
+    security(("staff_jwt" = [])),
+    params(TenantHeader),
+    responses(
+        (status = 200, body = CheckoutOriginList),
+        (status = 403, body = platform::Problem, content_type = "application/problem+json"),
+    )
+)]
+async fn list_checkout_origins(
+    staff: TenantStaff,
+    State(s): State<AppState>,
+) -> Result<Json<CheckoutOriginList>, Error> {
+    staff.require(Role::Admin)?;
+    let items = in_tx(&s, staff.tenant_id, async |tx| {
+        tenancy::checkout_origins(tx).await
+    })
+    .await?;
+    Ok(Json(CheckoutOriginList { items }))
+}
+
+/// Records the origin's full history (owner, login at most 15 minutes old): the platform claim
+/// of a platform hostname, or the merchant's attestation for a custom domain. Changes no mode.
+#[utoipa::path(
+    post,
+    path = "/admin/v1/checkout-origins/history",
+    tag = "storefront-admin",
+    security(("staff_jwt" = [])),
+    params(TenantHeader),
+    request_body = OriginHistoryInput,
+    responses(
+        (status = 200, body = CheckoutOrigin),
+        (status = 401, body = platform::Problem, content_type = "application/problem+json"),
+        (status = 403, body = platform::Problem, content_type = "application/problem+json"),
+        (status = 404, body = platform::Problem, content_type = "application/problem+json"),
+        (status = 409, description = "origin_history_unknown, platform_hostname", body = platform::Problem, content_type = "application/problem+json"),
+        (status = 422, description = "attestation_required, unsupported_attestation_version", body = platform::Problem, content_type = "application/problem+json"),
+    )
+)]
+async fn record_origin_history(
+    staff: TenantStaff,
+    State(s): State<AppState>,
+    body: Bytes,
+) -> Result<Json<CheckoutOrigin>, Error> {
+    staff.require(Role::Owner)?;
+    staff.require_fresh_auth()?;
+    let input: OriginHistoryInput = parse_json(&body)?;
+    let origin = shop_origin(&input.origin)?;
+    let actor = &staff.user.user_id;
+    Ok(Json(
+        in_tx(&s, staff.tenant_id, async |tx| {
+            tenancy::record_origin_history(tx, actor, &origin, input.attestation_version).await
+        })
+        .await?,
+    ))
+}
+
+/// Switches one exact origin between isolated and same-origin checkout (owner, login at most
+/// 15 minutes old), audited. Revokes every open checkout, link grant, identify and placement
+/// state of the shop, aliases included, and purges the edge's caches of the shop. Same-origin
+/// needs a known history and the platform's readiness; switching back to isolated needs
+/// neither. The current mode is a no-op.
+#[utoipa::path(
+    post,
+    path = "/admin/v1/checkout-origins/mode",
+    tag = "storefront-admin",
+    security(("staff_jwt" = [])),
+    params(TenantHeader),
+    request_body = CheckoutModeInput,
+    responses(
+        (status = 200, body = CheckoutOrigin),
+        (status = 401, body = platform::Problem, content_type = "application/problem+json"),
+        (status = 403, body = platform::Problem, content_type = "application/problem+json"),
+        (status = 404, body = platform::Problem, content_type = "application/problem+json"),
+        (status = 409, description = "origin_history_unknown, checkout_not_ready", body = platform::Problem, content_type = "application/problem+json"),
+        (status = 422, body = platform::Problem, content_type = "application/problem+json"),
+    )
+)]
+async fn switch_checkout_mode(
+    staff: TenantStaff,
+    State(s): State<AppState>,
+    body: Bytes,
+) -> Result<Json<CheckoutOrigin>, Error> {
+    staff.require(Role::Owner)?;
+    staff.require_fresh_auth()?;
+    let input: CheckoutModeInput = parse_json(&body)?;
+    let origin = shop_origin(&input.origin)?;
+    if input.mode == CheckoutMode::SameOrigin && !s.same_origin_ready {
+        return Err(Error::Conflict {
+            code: "checkout_not_ready",
+            detail: "the platform is not ready for same-origin checkout".into(),
+        });
+    }
+    let actor = &staff.user.user_id;
+    let (switched, view) = in_tx(&s, staff.tenant_id, async |tx| {
+        let switched = checkout_access::switch_mode(tx, actor, &origin, input.mode).await?;
+        Ok((switched, tenancy::checkout_origin(tx, &origin).await?))
+    })
+    .await?;
+    if switched {
+        s.edge.tenant(staff.tenant_id).await;
+    }
+    Ok(Json(view))
 }

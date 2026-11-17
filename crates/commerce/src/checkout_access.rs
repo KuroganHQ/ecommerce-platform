@@ -1,10 +1,26 @@
+//! Checkout credentials bound to an exact shop origin, its mode and the tenant's checkout
+//! fence generation (same-origin-checkout.md, Routing, C4, C6, C10).
+//!
+//! Lock order, for every transaction that touches checkout credentials:
+//!
+//! 1. The tenant's checkout fence: shared by every request ([`enter`], [`fence`]), exclusive by
+//!    [`switch_mode`]. Taken before any row lock: a request holding a row while it waits for
+//!    the fence behind a queued switch would deadlock with the request that holds the fence and
+//!    waits for that row.
+//! 2. The switch only: the `platform.checkout_origins` row, then the tenant's
+//!    `platform.checkout_fences` row (the mode trigger).
+//! 3. A shop cart before any checkout cart started from it.
+//! 4. Then the rows the operation reaches through its checkout: identify and placement state,
+//!    account codes, link grants, idempotency keys, orders, stock and coupons. Handoff
+//!    redemption alone locks its handoff before the cart it binds; no path locks a live handoff
+//!    after a cart.
+
 use chrono::{Duration, Utc};
 use platform::Error;
 use platform::db::TenantTx;
-use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::capability;
+use crate::{audit, capability};
 use crate::cart::{self, CartRef};
 use crate::storefront::Context;
 use crate::tenancy::{self, CheckoutMode};
@@ -513,31 +529,43 @@ pub async fn restore_cart(
     bind(tx, cart_id, &p).await
 }
 
-/// Switches one origin of the tenant to `mode` in its own transaction, revoking every checkout
-/// capability and handoff of the tenant. Waits for in-flight capability transactions of the
-/// tenant. `false` when the origin already had `mode`; an unknown history refuses same-origin
-/// (`409 origin_history_unknown`).
+/// Switches one origin of the tenant to `mode` as `actor`, audited, revoking every checkout
+/// credential of the tenant, aliases included, once the transaction commits: the mode trigger
+/// increments the tenant's fence generation. Waits for in-flight checkout transactions of the
+/// tenant. `false`, changing nothing, when the origin already has `mode`; an unknown history
+/// refuses same-origin (`409 origin_history_unknown`).
 pub async fn switch_mode(
-    db: &PgPool,
-    tenant_id: Uuid,
+    tx: &mut TenantTx,
+    actor: &str,
     origin: &ShopOrigin,
     mode: CheckoutMode,
 ) -> Result<bool, Error> {
-    let mut tx = db.begin().await?;
     sqlx::query!(
         "SELECT pg_advisory_xact_lock(platform.checkout_fence_key($1))",
-        tenant_id
+        tx.tenant_id()
     )
-    .execute(&mut *tx)
+    .execute(&mut **tx)
     .await?;
-    let changed = sqlx::query!(
-        "UPDATE platform.checkout_origins SET mode = $3
-         WHERE origin = $1 AND tenant_id = $2 AND mode <> $3",
+    let from = sqlx::query_scalar!(
+        "SELECT mode FROM platform.checkout_origins WHERE origin = $1 AND tenant_id = $2
+         FOR UPDATE",
         origin.as_str(),
-        tenant_id,
+        tx.tenant_id()
+    )
+    .fetch_optional(&mut **tx)
+    .await?
+    .ok_or(Error::NotFound)?;
+    if from == mode.as_str() {
+        return Ok(false);
+    }
+    let generation = sqlx::query_scalar!(
+        "UPDATE platform.checkout_origins SET mode = $3 WHERE origin = $1 AND tenant_id = $2
+         RETURNING mode_generation",
+        origin.as_str(),
+        tx.tenant_id(),
         mode.as_str()
     )
-    .execute(&mut *tx)
+    .fetch_one(&mut **tx)
     .await
     .map_err(|e| {
         if e.as_database_error()
@@ -550,21 +578,17 @@ pub async fn switch_mode(
         } else {
             e.into()
         }
-    })?
-    .rows_affected()
-        == 1;
-    if !changed {
-        sqlx::query_scalar!(
-            "SELECT 1 AS \"one!\" FROM platform.checkout_origins WHERE origin = $1 AND tenant_id = $2",
-            origin.as_str(),
-            tenant_id
-        )
-        .fetch_optional(&mut *tx)
-        .await?
-        .ok_or(Error::NotFound)?;
-    }
-    tx.commit().await?;
-    Ok(changed)
+    })?;
+    audit::record(
+        tx,
+        actor,
+        "checkout_origin.mode_switched",
+        "checkout_origin",
+        Some(origin.as_str()),
+        &serde_json::json!({ "from": from, "to": mode, "mode_generation": generation }),
+    )
+    .await?;
+    Ok(true)
 }
 
 #[cfg(test)]

@@ -281,23 +281,12 @@ async fn recovery_wrong_generation_denied(db: PgPool) {
     .execute(&c.runtime)
     .await
     .unwrap();
-    let alias = commerce::checkout_access::ShopOrigin::parse(&format!("https://{host}")).unwrap();
-    sqlx::query(
-        "UPDATE platform.checkout_origins SET history = 'merchant_attested_never_served',
-             attested_by = 'user-owner', attested_at = now(), attestation_version = 1
-         WHERE origin = $1",
-    )
-    .bind(alias.as_str())
-    .execute(&c.runtime)
-    .await
-    .unwrap();
-    assert!(
-        checkout_access::switch_mode(&c.runtime, c.shop.tenant, &alias, CheckoutMode::SameOrigin)
-            .await
-            .unwrap()
-    );
+    let alias = format!("https://{host}");
+    c.attest(&alias).await;
+    let (status, body) = c.set_mode(&alias, "same_origin").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
     let elsewhere = Edge {
-        origin: alias.as_str().to_owned(),
+        origin: alias,
         ..c.edge.clone()
     };
     let method = c.placeable().await;

@@ -190,6 +190,7 @@ pub fn state(db: PgPool, jwks: &Jwks, forced_interval: Duration) -> AppState {
             EXPERIMENTS_SECRET.as_bytes(),
         )),
         fetch: platform::http::SafeClient::new(["localhost".to_owned()]).unwrap(),
+        same_origin_ready: true,
     }
 }
 

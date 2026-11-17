@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT mode FROM platform.checkout_origins WHERE origin = $1 AND tenant_id = $2\n         FOR UPDATE",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "mode",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "platform.checkout_origins",
+            "name": "mode"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "3344b9e76fbab16b5396342d0d4c12e926a277d1b9f3a2eacb2dade928b4636a"
+}

@@ -89,6 +89,7 @@ fn state(db: PgPool) -> AppState {
         carriers: None,
         experiments: None,
         fetch: platform::http::SafeClient::new(Vec::<String>::new()).unwrap(),
+        same_origin_ready: false,
     }
 }
 

@@ -1104,16 +1104,18 @@ async fn same_origin_checkout(
     .execute(&c.owner)
     .await
     .unwrap();
+    let mut tx = platform::db::tenant_tx(&c.runtime, tenant).await.unwrap();
     assert!(
         commerce::checkout_access::switch_mode(
-            &c.runtime,
-            tenant,
+            &mut tx,
+            "test",
             origin,
             commerce::tenancy::CheckoutMode::SameOrigin,
         )
         .await
         .unwrap()
     );
+    tx.commit().await.unwrap();
 }
 
 fn account_code(purpose: &str, state: &str, origin: &str) -> Call<'static> {

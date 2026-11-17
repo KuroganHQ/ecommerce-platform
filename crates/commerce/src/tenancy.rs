@@ -1,5 +1,6 @@
 //! Tenants, domains and staff membership (spec §5.1, §5.3, A8, A29).
 
+use chrono::{DateTime, Utc};
 use platform::Error;
 use platform::db::{TenantTx, tenant_tx};
 use serde::{Deserialize, Serialize};
@@ -8,6 +9,7 @@ use sqlx::PgPool;
 use utoipa::ToSchema;
 use uuid::Uuid;
 
+use crate::checkout_access::ShopOrigin;
 use crate::{audit, capability, id, storefront, themes, unique_violation};
 
 /// Staff roles, weakest first (spec §5.3). `staff` has no settings, payment config, staff
@@ -420,7 +422,7 @@ pub struct Resolved {
 }
 
 /// Where checkout runs for one exact shop origin (same-origin-checkout.md, Routing).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ToSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum CheckoutMode {
     Isolated,
@@ -453,6 +455,192 @@ pub struct CheckoutOriginPolicy {
     pub mode_generation: i64,
     /// The origin itself in same-origin mode, `checkout.<host>` in isolated mode.
     pub checkout_origin: String,
+}
+
+/// The version of the full-history attestation text a merchant accepts (docs/runbook.md).
+pub const ATTESTATION_VERSION: i32 = 1;
+
+/// What is known about everything an exact origin ever served (same-origin-checkout.md, C3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum OriginHistory {
+    /// Same-origin checkout stays off.
+    UnknownOrUsed,
+    /// A platform hostname, claimed by this tenant from its first response and never
+    /// reassigned.
+    PlatformNeverReassigned,
+    /// A custom domain whose merchant attested that it never served a site outside the platform.
+    MerchantAttestedNeverServed,
+}
+
+impl OriginHistory {
+    fn parse(s: &str) -> Option<Self> {
+        match s {
+            "unknown_or_used" => Some(Self::UnknownOrUsed),
+            "platform_never_reassigned" => Some(Self::PlatformNeverReassigned),
+            "merchant_attested_never_served" => Some(Self::MerchantAttestedNeverServed),
+            _ => None,
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::UnknownOrUsed => "unknown_or_used",
+            Self::PlatformNeverReassigned => "platform_never_reassigned",
+            Self::MerchantAttestedNeverServed => "merchant_attested_never_served",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, ToSchema)]
+pub struct Attestation {
+    /// The staff user who attested.
+    pub by: String,
+    pub at: DateTime<Utc>,
+    /// [`ATTESTATION_VERSION`] when they attested.
+    pub version: i32,
+}
+
+/// The checkout policy of one exact origin of the tenant, as the admin sees it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, ToSchema)]
+pub struct CheckoutOrigin {
+    pub origin: String,
+    pub mode: CheckoutMode,
+    pub mode_generation: i64,
+    pub history: OriginHistory,
+    /// Set for [`OriginHistory::MerchantAttestedNeverServed`] only.
+    pub attestation: Option<Attestation>,
+}
+
+pub async fn checkout_origins(tx: &mut TenantTx) -> Result<Vec<CheckoutOrigin>, Error> {
+    let rows = sqlx::query!(
+        r#"SELECT origin AS "origin!", mode, mode_generation, history, attested_by, attested_at,
+                  attestation_version
+           FROM platform.checkout_origins WHERE tenant_id = $1 ORDER BY origin"#,
+        tx.tenant_id()
+    )
+    .fetch_all(&mut **tx)
+    .await?;
+    rows.into_iter()
+        .map(|r| {
+            let mode = CheckoutMode::parse(&r.mode)
+                .ok_or_else(|| Error::Internal(format!("checkout mode {}", r.mode)))?;
+            let history = OriginHistory::parse(&r.history)
+                .ok_or_else(|| Error::Internal(format!("origin history {}", r.history)))?;
+            let attestation = match (r.attested_by, r.attested_at, r.attestation_version) {
+                (Some(by), Some(at), Some(version)) => Some(Attestation { by, at, version }),
+                _ => None,
+            };
+            Ok(CheckoutOrigin {
+                origin: r.origin,
+                mode,
+                mode_generation: r.mode_generation,
+                history,
+                attestation,
+            })
+        })
+        .collect()
+}
+
+pub async fn checkout_origin(
+    tx: &mut TenantTx,
+    origin: &ShopOrigin,
+) -> Result<CheckoutOrigin, Error> {
+    checkout_origins(tx)
+        .await?
+        .into_iter()
+        .find(|o| o.origin == origin.as_str())
+        .ok_or(Error::NotFound)
+}
+
+/// Records what is known about the origin's whole history (C3), never its mode. A platform
+/// hostname records its platform claim, which must be complete (`409 origin_history_unknown`)
+/// and takes no attestation (`409 platform_hostname`). A custom domain records the merchant's
+/// attestation of [`ATTESTATION_VERSION`] by `actor`, now.
+pub async fn record_origin_history(
+    tx: &mut TenantTx,
+    actor: &str,
+    origin: &ShopOrigin,
+    attestation_version: Option<i32>,
+) -> Result<CheckoutOrigin, Error> {
+    let platform_issued = sqlx::query_scalar!(
+        "SELECT c.platform_issued FROM platform.checkout_origins o
+         JOIN platform.hostname_claims c ON c.hostname = o.hostname AND c.tenant_id = o.tenant_id
+         WHERE o.origin = $1 AND o.tenant_id = $2",
+        origin.as_str(),
+        tx.tenant_id()
+    )
+    .fetch_optional(&mut **tx)
+    .await?
+    .ok_or(Error::NotFound)?;
+    let (history, version) = match (platform_issued, attestation_version) {
+        (true, None) => (OriginHistory::PlatformNeverReassigned, None),
+        (true, Some(_)) => {
+            return Err(Error::Conflict {
+                code: "platform_hostname",
+                detail: "a platform hostname's history is the platform's own; it takes no attestation"
+                    .into(),
+            });
+        }
+        (false, Some(ATTESTATION_VERSION)) => (
+            OriginHistory::MerchantAttestedNeverServed,
+            Some(ATTESTATION_VERSION),
+        ),
+        (false, Some(_)) => {
+            return Err(invalid(
+                "unsupported_attestation_version",
+                &format!("the current attestation is version {ATTESTATION_VERSION}"),
+            ));
+        }
+        (false, None) => {
+            return Err(invalid(
+                "attestation_required",
+                "a custom domain needs the merchant's full-history attestation",
+            ));
+        }
+    };
+    sqlx::query!(
+        "UPDATE platform.checkout_origins
+         SET history = $3, attestation_version = $4,
+             attested_by = CASE WHEN $4::integer IS NULL THEN NULL ELSE $5 END,
+             attested_at = CASE WHEN $4::integer IS NULL THEN NULL ELSE now() END
+         WHERE origin = $1 AND tenant_id = $2",
+        origin.as_str(),
+        tx.tenant_id(),
+        history.as_str(),
+        version,
+        actor
+    )
+    .execute(&mut **tx)
+    .await
+    .map_err(|e| {
+        if e.as_database_error().and_then(|d| d.constraint())
+            == Some("checkout_origins_platform_history")
+        {
+            Error::Conflict {
+                code: "origin_history_unknown",
+                detail: "the platform claim of this hostname is incomplete".into(),
+            }
+        } else {
+            e.into()
+        }
+    })?;
+    let recorded = checkout_origin(tx, origin).await?;
+    audit::record(
+        tx,
+        actor,
+        "checkout_origin.history_recorded",
+        "checkout_origin",
+        Some(origin.as_str()),
+        &json!({
+            "history": recorded.history,
+            "attestation_version": version,
+            "mode": recorded.mode,
+            "mode_generation": recorded.mode_generation,
+        }),
+    )
+    .await?;
+    Ok(recorded)
 }
 
 /// Resolves a verified domain of an active tenant, or an account origin of one of its
