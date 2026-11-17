@@ -329,7 +329,13 @@ fn exact_clause(q: &str) -> Option<String> {
 
 /// The multi-search for `req`. `exclude`: products already placed first (exact SKU/EAN
 /// matches), left out of the text hits so the combined list has no duplicates.
-fn plan(scope: &Scope, req: &SearchRequest, facets: bool, exclude: &[Uuid]) -> Plan {
+fn plan(
+    scope: &Scope,
+    req: &SearchRequest,
+    facets: bool,
+    exclude: &[Uuid],
+    product_id_sortable: bool,
+) -> Plan {
     let uid = index_uid(scope.tenant_id, &scope.locale);
     let q = lang::analyze(&req.q, &scope.locale);
     let base = base_clauses(scope, req);
@@ -354,7 +360,7 @@ fn plan(scope: &Scope, req: &SearchRequest, facets: bool, exclude: &[Uuid]) -> P
         }
         Sort::Relevance => vec![],
     };
-    if !sort.is_empty() {
+    if !sort.is_empty() && product_id_sortable {
         sort.push("product_id:asc".into());
     }
     let hits_filter = if exclude.is_empty() {
@@ -521,6 +527,20 @@ fn hit_ids(result: Option<&Value>) -> Vec<(Uuid, Uuid)> {
 // ---------------------------------------------------------------------------------------
 // Service
 
+const PRODUCT_ID_SORTABLE_SINCE: i32 = 4;
+
+async fn product_id_sortable(tx: &mut TenantTx, locale: &str) -> Result<bool, Error> {
+    Ok(sqlx::query_scalar!(
+        r#"SELECT EXISTS (
+               SELECT 1 FROM search_indexes WHERE locale = $1 AND settings_version >= $2
+           ) AS "sortable!""#,
+        locale,
+        PRODUCT_ID_SORTABLE_SINCE
+    )
+    .fetch_one(&mut **tx)
+    .await?)
+}
+
 /// Runs a search. Meilisearch failures surface as [`Error::Unavailable`] (search is degraded,
 /// the shop keeps working).
 pub async fn search(
@@ -552,7 +572,8 @@ pub async fn search(
     };
     let exact_products: Vec<Uuid> = exact.iter().map(|(_, p)| *p).collect();
     let k = u32::try_from(exact.len()).unwrap_or(per_page);
-    let mut plan = plan(scope, req, true, &exact_products);
+    let sortable = product_id_sortable(tx, &scope.locale).await?;
+    let mut plan = plan(scope, req, true, &exact_products, sortable);
     // Page p of [exact.., text..] holds text items [(p-1)·n - k, p·n - k): the tail of text
     // page p-1 and the head of text page p.
     let previous = (k > 0 && req.page > 1).then(|| {
@@ -920,7 +941,8 @@ pub async fn suggest(
     };
     // Exact SKU/EAN matches, then stemmed matches, then the word being typed as a prefix of
     // the folded names (unstemmed). One list, no pagination: merging is safe here.
-    let mut queries = plan(scope, &req, false, &[]).queries;
+    let sortable = product_id_sortable(tx, &scope.locale).await?;
+    let mut queries = plan(scope, &req, false, &[], sortable).queries;
     let mut prefix = queries[0].clone();
     prefix["q"] = json!(lang::analyze_prefix(q, &scope.locale));
     queries.push(prefix);
@@ -1033,7 +1055,7 @@ mod tests {
             price_min: Some(100),
             ..req()
         };
-        let p = plan(&scope(), &r, true, &[]);
+        let p = plan(&scope(), &r, true, &[], true);
         let hits = &p.queries[0];
         assert_eq!(hits["indexUid"], format!("t_{}_cs", Uuid::from_u128(7)));
         assert_eq!(hits["q"], "pansk trick");
@@ -1074,7 +1096,7 @@ mod tests {
             Some(r#"skus = "TS-RED-M" OR eans = "TS-RED-M""#)
         );
         assert!(exact_clause(&"x".repeat(65)).is_none());
-        let p = plan(&scope(), &r, true, &[Uuid::from_u128(5)]);
+        let p = plan(&scope(), &r, true, &[Uuid::from_u128(5)], true);
         assert_eq!(
             p.queries[0]["filter"],
             format!(
@@ -1100,7 +1122,7 @@ mod tests {
             )]),
             ..req()
         };
-        let p = plan(&scope(), &r, true, &[]);
+        let p = plan(&scope(), &r, true, &[], true);
         assert_eq!(
             p.queries[0]["filter"],
             r#"(active_in_markets = "cz") AND (brand IN ["a\" OR active_in_markets EXISTS OR brand = \"b"])"#
@@ -1123,6 +1145,7 @@ mod tests {
                 },
                 false,
                 &[],
+                true,
             );
             assert_eq!(
                 p.queries[0]["sort"],
@@ -1157,6 +1180,7 @@ mod tests {
                     },
                     false,
                     &[],
+                    true,
                 );
                 assert_eq!(p.queries[0]["sort"], expected, "{sort:?} {q:?}");
             }
@@ -1185,12 +1209,13 @@ mod tests {
             },
             false,
             &[],
+            true,
         );
         assert_eq!(
             p.queries[0]["sort"],
             json!(["price.sk_eu:desc", "product_id:asc"])
         );
-        let p = plan(&s, &req(), false, &[]);
+        let p = plan(&s, &req(), false, &[], true);
         assert_eq!(
             p.queries[0]["sort"],
             json!(["popularity:desc", "created_at:desc", "product_id:asc"])
@@ -1203,6 +1228,7 @@ mod tests {
             },
             false,
             &[],
+            true,
         );
         assert_eq!(p.queries[0]["sort"], json!([]));
     }
@@ -1213,7 +1239,7 @@ mod tests {
             filters: filters(&[("opt.color", &["red"])]),
             ..req()
         };
-        let p = plan(&scope(), &r, true, &[]);
+        let p = plan(&scope(), &r, true, &[], true);
         let mut results = vec![json!({}); p.queries.len()];
         results[p.universe.unwrap_or_default()] = json!({ "facetDistribution": {
             "opt.color": { "blue": 3, "green": 1, "red": 2 },
@@ -1262,7 +1288,7 @@ mod tests {
             filters: filters(&[("brand", &["Zeta"])]),
             ..req()
         };
-        let p = plan(&scope(), &r, true, &[]);
+        let p = plan(&scope(), &r, true, &[], true);
         let mut results = vec![json!({}); p.queries.len()];
         // The universe was cut before "Zeta"; the facet's own query still reaches it.
         results[p.universe.unwrap_or_default()] =
