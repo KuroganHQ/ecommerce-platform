@@ -5129,7 +5129,7 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * RFC 8058 one-click unsubscribe (decision C11) for a campaign or an abandoned-cart
+         * RFC 8058 one-click unsubscribe for a campaign or an abandoned-cart
          *     reminder: the bearer token alone authorizes it, whatever else the request carries.
          */
         post: operations["one_click"];

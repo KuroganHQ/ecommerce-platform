@@ -7952,7 +7952,7 @@
         "tags": [
           "storefront"
         ],
-        "summary": "RFC 8058 one-click unsubscribe (decision C11) for a campaign or an abandoned-cart\nreminder: the bearer token alone authorizes it, whatever else the request carries.",
+        "summary": "RFC 8058 one-click unsubscribe for a campaign or an abandoned-cart\nreminder: the bearer token alone authorizes it, whatever else the request carries.",
         "operationId": "one_click",
         "parameters": [
           {
