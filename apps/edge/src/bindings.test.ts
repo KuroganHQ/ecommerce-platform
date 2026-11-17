@@ -37,7 +37,12 @@ test("newsletter link pages read their grant, never act on it through the bindin
     "/link-grants/newsletter-preferences",
   ]) {
     expect(can("GET", path), path).toBe(true);
-    expect(can("POST", path), path).toBe(false);
+    for (const method of ["POST", "PUT", "DELETE"])
+      expect(can(method, path), `${method} ${path}`).toBe(false);
+    expect(
+      STOREFRONT_OPERATIONS.some((o) => o.path.test(path)),
+      `theme binding ${path}`,
+    ).toBe(false);
   }
   for (const path of [
     "/link-grants/newsletter-preferences/unsubscribe",
@@ -46,13 +51,13 @@ test("newsletter link pages read their grant, never act on it through the bindin
     "/link-grants/watch-unsubscribe",
     "/link-grants/flow-unsubscribe",
     "/link-grants/restore-cart",
+    "/link-grants",
+    "/link-grants/newsletter-confirmation/x",
+    "/link-grants/newsletter-preferencesx",
   ]) {
     expect(can("GET", path), path).toBe(false);
     expect(can("POST", path), path).toBe(false);
   }
-  expect(
-    STOREFRONT_OPERATIONS.some((o) => o.path.test("/link-grants/newsletter-preferences")),
-  ).toBe(false);
 });
 
 test("account pages read the customer's email preferences, never write them", () => {
