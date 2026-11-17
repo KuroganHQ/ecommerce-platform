@@ -379,6 +379,107 @@ async fn popular_ordering_uses_newest_to_break_ties(db: PgPool) {
 
 #[sqlx::test(migrations = "../../migrations")]
 #[ignore = "needs Meilisearch: make test-search"]
+async fn every_sort_breaks_ties_alike_in_meilisearch_and_the_postgres_fallback(db: PgPool) {
+    use commerce::storefront::listing::{self, ListingQuery, Sort as ListingSort};
+    use commerce::storefront::{self, PublicUrls};
+
+    let s = shop(&db).await;
+    let category = testkit::catalog::category(&s.runtime, s.tenant, "trika", None).await;
+    let mut products = Vec::new();
+    for sku in ["TIE-A", "TIE-B", "TIE-C", "TIE-D"] {
+        let mut input = testkit::catalog::product_input(sku, 1);
+        input.category_ids = vec![category.id];
+        let product = testkit::catalog::create(&s.runtime, s.tenant, &input).await;
+        testkit::pricing::set_prices(
+            &s.runtime,
+            s.tenant,
+            s.cz_list,
+            &[(product.variants[0].id, 100)],
+        )
+        .await;
+        products.push(product.id);
+    }
+    products.sort();
+    let second = chrono::DateTime::from_timestamp(1_700_000_000, 0).unwrap();
+    let mut tx = tenant_tx(&s.runtime, s.tenant).await.unwrap();
+    for (product, micros) in products.iter().zip([500_000, 500_000, 500_001, 200_000]) {
+        sqlx::query("UPDATE products SET created_at = $2 WHERE id = $1")
+            .bind(product)
+            .bind(second + chrono::Duration::microseconds(micros))
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+    }
+    sqlx::query("UPDATE product_categories SET position = 0")
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO platform.domains (hostname, tenant_id, market_id, is_primary, verified_at)
+         VALUES ($1, $2, $3, true, now())",
+    )
+    .bind(format!("{}.localhost", s.tenant))
+    .bind(s.tenant)
+    .bind(s.cz)
+    .execute(&mut *tx)
+    .await
+    .unwrap();
+    tx.commit().await.unwrap();
+    for product in &products {
+        assert_eq!(s.index(*product).await, Indexed::Done);
+    }
+    s.settle().await;
+
+    let [a, b, c, d] = products[..] else {
+        unreachable!()
+    };
+    let newest_then_id = [c, a, b, d];
+    let id_only = [a, b, c, d];
+    let storage = testkit::memory_storage();
+    let engine = storefront::Search {
+        meili: &s.search_meili,
+        storage: &storage,
+    };
+    let mut tx = tenant_tx(&s.runtime, s.tenant).await.unwrap();
+    let ctx = storefront::context(
+        &mut tx,
+        &PublicUrls::default(),
+        s.cz,
+        None,
+        chrono::Utc::now(),
+    )
+    .await
+    .unwrap();
+    for (sort, expected) in [
+        (ListingSort::Recommended, newest_then_id),
+        (ListingSort::Popular, newest_then_id),
+        (ListingSort::BestSelling, newest_then_id),
+        (ListingSort::TopRated, newest_then_id),
+        (ListingSort::Newest, newest_then_id),
+        (ListingSort::PriceAsc, id_only),
+        (ListingSort::PriceDesc, id_only),
+    ] {
+        let q = ListingQuery {
+            category_id: Some(category.id),
+            sort,
+            page: 1,
+            per_page: 24,
+            ..ListingQuery::default()
+        };
+        let meili = listing::search_listing(&mut tx, &ctx, engine, &q)
+            .await
+            .unwrap();
+        let postgres = listing::listing(&mut tx, &ctx, &q).await.unwrap();
+        assert_eq!(meili.product_ids, expected, "{sort:?} in Meilisearch");
+        assert_eq!(
+            postgres.product_ids, expected,
+            "{sort:?} in the Postgres fallback"
+        );
+    }
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+#[ignore = "needs Meilisearch: make test-search"]
 async fn best_selling_and_top_rated_put_products_without_the_value_last(db: PgPool) {
     let s = shop(&db).await;
     let mut products = Vec::new();
