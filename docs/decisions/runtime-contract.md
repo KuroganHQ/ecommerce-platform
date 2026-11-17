@@ -183,6 +183,7 @@ cart capability is injected from the `__Host-cart` cookie by the edge, never exp
 | `<shop>/_p/e`, `/_p/newsletter` (POST) | events beacon, newsletter |
 | `<shop>/_p/consent`, `checkout.<shop>/_p/consent` (GET, POST) | consent (A20, `consent-contract.md`) |
 | `<shop>/_p/speculation-rules.json` | rules |
+| `<shop>/account[/addresses\|security\|verify\|orders/<uuid>]`, same on `checkout.<shop>` | `308`, `no-store`, to the same path and query on the market's account origin (SHOP-95, §13) |
 | other `/_p/*`, `/_edge/*` | 404 |
 | `<shop>/media/*` | media origin (image variants) |
 | `<shop>/robots.txt`, `/llms.txt`, `/sitemap*.xml`, `/feeds/*` | API passthrough (`/storefront/v1/files/*`) |
@@ -190,7 +191,7 @@ cart capability is injected from the `__Host-cart` cookie by the edge, never exp
 | `<shop>` anything else (GET/HEAD only, else 405) | theme worker |
 | `checkout.<shop>/start?h=` | handoff exchange |
 | `checkout.<shop>/_p/tokens.css` | tenant tokens as CSS (A6) |
-| `checkout.<shop>/_p/account/*` | customer accounts → `/storefront/v1/customer/*` (WP9, §12) |
+| `<account origin>` (`<label>.<ACCOUNT_DOMAIN>`) | customer accounts: pages and `/_p/account/*` → `/storefront/v1/customer/*` (§13) |
 | `checkout.<shop>` assets / everything else | checkout artifact / checkout worker (always `no-store`) |
 | `preview-<n>--<shop>` | the previewed revision (WP23, §14): token → cookie, `no-store`, `noindex` |
 | internal port 8788: `/_edge/purge`, `/_edge/healthz` | bearer `EDGE_PURGE_TOKEN` (constant-time compare, ≥ 16 chars); not routed by Caddy |
@@ -387,7 +388,8 @@ separate cache namespace, never cached (already bypassed by the policy).
   unprefixed (cookie `Path=/_p`). The API builds every page-model href with
   `Context::path()` and canonicals with `Context::page_url()`; hreflang alternates cover every
   (market, locale). `ShopModel.base_path` is what themes put in front of the links they build
-  themselves; `ShopModel.checkout_url` is the checkout origin (account, `/withdraw`).
+  themselves; `ShopModel.checkout_url` is the checkout origin (`/withdraw`) and
+  `ShopModel.account_url` the account origin (§13).
 - **New `/_p/*` routes:** `POST /_p/consent` (WP8 shipped a stub; WP9 replaced it with the real
   route, see §13 and `consent-contract.md`). `POST /_p/newsletter` also accepts a plain
   urlencoded form and answers 303 back to the same-origin `Referer` (else `/`) with
@@ -421,24 +423,32 @@ separate cache namespace, never cached (already bypassed by the policy).
   recommendation), and the listing's no-JS submit button lives in
   `<noscript>` (hiding it on hydration shifted the toolbar, CLS 0.03).
 
-## 13. WP9: customer accounts and consent on the edge
+## 13. WP9, SHOP-95: customer accounts and consent on the edge
 
-- `checkout.<shop>/_p/account/{magic-link, magic-link/consume, login, logout, me, password,
-  addresses[/<id>]}` proxy to `/storefront/v1/customer/*`. State-changing calls need a
-  same-origin `Origin` (else `Sec-Fetch-Site: same-origin`) and a JSON body (CSRF, §14).
-- The session is `__Host-sid` (HttpOnly, Secure, SameSite=Lax, host-only on the checkout
+- Customer accounts live only on the market's account origin, `<label>.<ACCOUNT_DOMAIN>`
+  (`<slug>` for the default market, `<market code>--<slug>` otherwise). The API's resolve
+  response names it in `account_hostname`.
+- `<account origin>/_p/account/{magic-link, magic-link/consume, login, logout, me, password,
+  addresses[/<id>], consent, orders/<id>/withdrawal}` proxy to `/storefront/v1/customer/*`.
+  Every method needs `Sec-Fetch-Site: same-origin`, a present `Origin` must equal the account
+  origin, and bodies are JSON. Responses carry no CORS headers.
+- The session is `__Host-sid` (HttpOnly, Secure, SameSite=Lax, host-only on the account
   origin, 30 days, renewed on every successful account call). The API returns a new session
   in `X-Session-Token` and asks for deletion with `X-Session-Clear: 1` (or a `401`); the edge
-  turns both into `Set-Cookie` and never forwards them. The shop origin never sees the session.
-- The edge forwards the session (`X-Customer-Session`), the checkout cart (`X-Cart-Token`,
-  merged into the customer's cart on sign-in, A4), the consent subject (`X-Consent-Subject`)
-  and the client IP (`X-Client-Ip`, the last `X-Forwarded-For` hop appended by Caddy; used
-  for rate limits and stored only as a salted hash). All of these are stripped from client
-  requests and refused from workers.
-- SSR pages of the checkout app get the session and consent subject through the `CHECKOUT`
-  binding context (`GET /customer/me`, `/customer/addresses`, `/consent`), never the cookies.
-- Pages with a `token` query parameter (`/account/verify?token=`) are served with
-  `Referrer-Policy: no-referrer`.
+  turns both into `Set-Cookie` and never forwards them.
+- Only the account origin forwards the session (`X-Customer-Session`), with the client IP
+  (`X-Client-Ip`, the last `X-Forwarded-For` hop appended by Caddy; used for rate limits and
+  stored only as a salted hash). No cart or consent cookie is read there. Account pages get the
+  session through the `CHECKOUT` binding context, never the cookie.
+- The shop origin and `checkout.<shop>` never read or forward the session: checkout, orders,
+  withdrawals, fake pay, consent and SSR run as a guest (SHOP-95 owner decision 1, until
+  SHOP-54 slices 15-16). Sign-in neither attaches nor merges carts.
+- Old account links on both origins (`/account`, `/account/addresses`, `/account/security`,
+  `/account/verify`, `/account/orders/<uuid>`) answer `308`, `no-store`, to the same path and
+  query on the account origin. The edge builds the target from the resolved account host, the
+  request's scheme and port, and the matched path, never from the raw request path. Any other
+  `/account*` path and every `/_p/account/*` path there is a 404.
+- `/account/verify` is served with `Referrer-Policy: no-referrer`.
 
 ## 14. WP23: tenant themes, the builder and previews
 

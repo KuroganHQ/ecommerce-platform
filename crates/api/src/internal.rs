@@ -115,6 +115,14 @@ pub struct ResolveQuery {
     pub host: String,
 }
 
+/// [`Resolved`] plus the market's account origin host, `<label>.<ACCOUNT_DOMAIN>` (A1).
+#[derive(Serialize, ToSchema)]
+pub struct ResolvedSite {
+    #[serde(flatten)]
+    pub site: Resolved,
+    pub account_hostname: String,
+}
+
 /// Hostname -> tenant and market, for verified domains of active tenants.
 #[utoipa::path(
     get,
@@ -123,7 +131,7 @@ pub struct ResolveQuery {
     security(("service_token" = [])),
     params(ResolveQuery),
     responses(
-        (status = 200, body = Resolved),
+        (status = 200, body = ResolvedSite),
         (status = 401, body = platform::Problem, content_type = "application/problem+json"),
         (status = 404, body = platform::Problem, content_type = "application/problem+json"),
     )
@@ -132,15 +140,19 @@ async fn resolve(
     _service: Service,
     State(s): State<AppState>,
     query: Result<Query<ResolveQuery>, axum::extract::rejection::QueryRejection>,
-) -> Result<Json<Resolved>, Error> {
+) -> Result<Json<ResolvedSite>, Error> {
     let Query(q) = query.map_err(|e| Error::BadRequest {
         code: "invalid_query",
         detail: e.body_text(),
     })?;
-    tenancy::resolve_host(&s.db, &q.host)
+    let site = tenancy::resolve_host(&s.db, &q.host)
         .await?
-        .map(Json)
-        .ok_or(Error::NotFound)
+        .ok_or(Error::NotFound)?;
+    let account_hostname = format!("{}.{}", site.account_label, s.public_urls.account_domain);
+    Ok(Json(ResolvedSite {
+        site,
+        account_hostname,
+    }))
 }
 
 /// A file of a registered theme/checkout artifact (A22), for the edge to unpack locally. The

@@ -70,7 +70,7 @@ const link =
       <h2 id="footer-service" class={heading}>{t("footer.customer_service")}</h2>
       <ul class="grid gap-0.5">
         {shop.menus.footer.map((m) => <li><a href={m.href} class={link}>{m.label}</a></li>)}
-        <li><a href={`${shop.checkout_url}/account`} class={link}>{t("nav.account")}</a></li>
+        <li><a href={`${shop.account_url}/account`} class={link}>{t("nav.account")}</a></li>
         <li><a href={`${shop.checkout_url}/withdraw`} class={link}>{t("footer.withdrawal")}</a></li>
       </ul>
     </nav>

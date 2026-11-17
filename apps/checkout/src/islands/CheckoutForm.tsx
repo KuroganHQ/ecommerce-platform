@@ -1,6 +1,5 @@
 import { t } from "@platform/storefront-sdk/format";
 import type {
-  Address,
   CheckoutAddress,
   CheckoutView,
   PaymentMethodKind,
@@ -33,16 +32,6 @@ const blank = (country: string): CheckoutAddress => ({
   postal_code: "",
   country,
   phone: null,
-});
-
-const fromSaved = (a: Address): CheckoutAddress => ({
-  name: a.name,
-  company: a.company ?? null,
-  street: a.street,
-  city: a.city,
-  postal_code: a.postal_code,
-  country: a.country,
-  phone: a.phone ?? null,
 });
 
 const complete = (a: CheckoutAddress) =>
@@ -92,7 +81,7 @@ const newKey = () =>
 
 export default function CheckoutForm(
   props: { m: M; locale: string; initial: CheckoutView; shopUrl: string } & (
-    | { mode: "isolated"; customerEmail?: string | undefined; saved: Address[] }
+    | { mode: "isolated" }
     | {
         mode: "same-origin";
         pageToken: string;
@@ -103,21 +92,15 @@ export default function CheckoutForm(
 ) {
   const m = props.m;
   const isolated = props.mode === "isolated";
-  const saved = props.mode === "isolated" ? props.saved : [];
-  const customerEmail = props.mode === "isolated" ? props.customerEmail : undefined;
   const pageToken = props.mode === "same-origin" ? props.pageToken : "";
   const choices = props.mode === "same-origin" ? props.choices : null;
   const refusal = props.mode === "same-origin" ? props.refusal : null;
   const [view, setView] = createSignal(props.initial);
   const firstCountry = () => props.initial.ship_to_countries[0] ?? "CZ";
-  const savedDefault = saved.find((a) => a.is_default) ?? saved[0];
-  const [email, setEmail] = createSignal(props.initial.email ?? customerEmail ?? "");
+  const [email, setEmail] = createSignal(props.initial.email ?? "");
   const [phone, setPhone] = createSignal(props.initial.phone ?? "");
   const [billing, setBilling] = createSignal<CheckoutAddress>(
-    props.initial.billing_address ??
-      (savedDefault && props.initial.ship_to_countries.includes(savedDefault.country)
-        ? fromSaved(savedDefault)
-        : blank(firstCountry())),
+    props.initial.billing_address ?? blank(firstCountry()),
   );
   const [elsewhere, setElsewhere] = createSignal(props.initial.shipping_address != null);
   const [delivery, setDelivery] = createSignal<CheckoutAddress>(
@@ -419,20 +402,6 @@ export default function CheckoutForm(
               <h2 id="co-contact" class={h2}>
                 1. {t(m, "checkout.contact")}
               </h2>
-              <Show
-                when={customerEmail}
-                fallback={
-                  <p class="mb-3 text-sm">
-                    <a href="/account?next=/" class="text-identity-ink underline">
-                      {t(m, "checkout.have_account")}
-                    </a>
-                  </p>
-                }
-              >
-                <p class="mb-3 text-sm text-muted-foreground">
-                  {t(m, "checkout.signed_in", { email: customerEmail ?? "" })}
-                </p>
-              </Show>
               <div class="grid gap-3 sm:grid-cols-2">
                 <TextField
                   label={t(m, "account.email")}
@@ -460,24 +429,6 @@ export default function CheckoutForm(
               <h2 id="co-address" class={h2}>
                 2. {t(m, "checkout.address")}
               </h2>
-              <Show when={saved.length > 0}>
-                <SelectField
-                  class="mb-3"
-                  label={t(m, "checkout.saved_address")}
-                  value=""
-                  options={[
-                    { value: "", label: t(m, "checkout.saved_address_none") },
-                    ...saved.map((a) => ({
-                      value: a.id,
-                      label: `${a.name}, ${a.street}, ${a.city}`,
-                    })),
-                  ]}
-                  onChange={(id) => {
-                    const a = saved.find((s) => s.id === id);
-                    if (a) setBilling(fromSaved(a));
-                  }}
-                />
-              </Show>
               {addressFields(billing, setBilling, "billing")}
               <Checkbox
                 class="mt-4"

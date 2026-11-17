@@ -10,8 +10,8 @@ into a beacon or any other payload are never trusted.
 
 `analytics`, `ads`, `personalization`, `email_marketing`, `review_invites` (A20). The banner
 asks for the ones in `GET /shop` → `consent.purposes` (M1: `analytics`, `ads`,
-`personalization`); the email purposes belong to checkout and the account (signed-in
-customers change them on the preferences page).
+`personalization`); the email purposes belong to checkout placement and the account origin
+(`/account/consent`, through `/_p/account/consent`, SHOP-95).
 
 ## Recording a choice: `POST /_p/consent`
 
@@ -41,8 +41,8 @@ Origin: https://<same origin>
   `null` = never asked.
 
 Each purpose becomes one append-only `consent_records` row (`subject`, `purpose`, `granted`,
-`text_version`, `source`, IP hashed with the daily rotating salt, time). On the checkout origin a
-signed-in customer's choice is recorded for the customer as well.
+`text_version`, `source`, IP hashed with the daily rotating salt, time), for the anonymous
+subject only. No route on the shop or checkout origin records a choice for a customer.
 
 ## Cookies (only after a choice)
 
@@ -54,8 +54,9 @@ Before the first choice nothing is stored on the device (A20).
 | `consent` | granted purposes, comma-separated, URL-encoded (`analytics%2Cpersonalization`; empty = decided, nothing granted) | `Domain=<shop host>; Path=/; Secure; SameSite=Lax; Max-Age=180 days` | yes | the SDK at once on the shop origin, and the edge after every recorded `POST` (same name, domain and path, so it is one cookie) |
 | `__Secure-consent_exp` | `1` while the subject's analytics grant covers experiments (the API's `X-Consent-Experiments` answer) | `Domain=<shop host>; Path=/; Secure; SameSite=Lax; HttpOnly; Max-Age=13 months`, cleared (`Max-Age=0`) by a choice that does not cover them | no | edge, after every recorded `POST` |
 
-`Domain=<shop host>` makes both visible on `checkout.<shop host>` (the preferences page and
-sign-in linking run there), and lets the preferences page update the banner's cookie.
+`Domain=<shop host>` makes both visible on `checkout.<shop host>` (the preferences page runs
+there), and lets the preferences page update the banner's cookie. The account origin is
+another site and never receives them.
 
 A theme uses the `consent` cookie (`readConsent`, `hasConsent`) only to decide what to render
 (banner shown while it is missing; RUM only with `analytics`; recently viewed only with
@@ -63,23 +64,22 @@ A theme uses the `consent` cookie (`readConsent`, `hasConsent`) only to decide w
 
 ## Reading the state: `GET /_p/consent`
 
-Same routes, no body. Answers a `ConsentState`: the cookie purposes (`analytics`, `ads`,
-`personalization`) of this browser's anonymous subject and, when signed in on the checkout
-origin, the email purposes of the customer; `text_version: null` when there is no choice yet.
+Same routes, no body. Answers a `ConsentState`: this browser's anonymous subject's choices;
+`text_version: null` when there is no choice yet.
 Sets no cookies. Themes normally read the `consent` cookie instead (no request).
 
 ## Preferences page
 
 `checkout.<shop>/consent` (`GET /shop` → `consent.preferences_url`), linked from the banner
-and the footer. It posts the same contract with `source: "preferences"`. Signed-in customers
-also see `email_marketing` and `review_invites`.
+and the footer. It posts the same contract with `source: "preferences"` and shows the cookie
+purposes only.
 
-## Sign-in linking
+## Customers
 
-When a customer signs in on the checkout origin, the anonymous subject's latest choices that
-are newer than the customer's own are copied to the customer (`source: linked`), so the most
-recent decision of the person wins. Later banner choices on the shop origin update the
-anonymous subject and are linked again at the next sign-in.
+A customer's `email_marketing` and `review_invites` are set on the account origin
+(`GET`/`POST /_p/account/consent`, source `account`) or at checkout placement. Sign-in does not
+copy the anonymous subject's choices to the customer (SHOP-95: the account origin has no
+consent cookie). Records written as `source: linked` before SHOP-95 stay as evidence.
 
 ## Experiments (SHOP-96)
 

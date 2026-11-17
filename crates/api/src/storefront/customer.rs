@@ -29,7 +29,7 @@ use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 use uuid::Uuid;
 
-use super::{CART_HEADER, Shopper, StorefrontHeaders, with_ctx};
+use super::{Shopper, StorefrontHeaders, with_ctx};
 use crate::AppState;
 use crate::admin::{IdParam, parse_json, path_id};
 
@@ -100,12 +100,6 @@ pub(crate) struct SessionHeader {
 #[into_params(parameter_in = Header)]
 #[allow(dead_code)]
 pub(crate) struct SignInHeaders {
-    /// Checkout cart capability (`__Host-cart`): the cart is attached to the customer (A4).
-    #[param(rename = "X-Cart-Token")]
-    x_cart_token: Option<String>,
-    /// Anonymous consent subject (consent cookie): its choices move to the customer (A20).
-    #[param(rename = "X-Consent-Subject")]
-    x_consent_subject: Option<String>,
     /// The client's IP (rate limits; stored only as a salted hash).
     #[param(rename = "X-Client-Ip")]
     x_client_ip: Option<String>,
@@ -172,14 +166,11 @@ async fn request_magic_link(
 async fn consume_magic_link(
     shopper: Shopper,
     State(s): State<AppState>,
-    headers: HeaderMap,
     body: Bytes,
 ) -> Result<Response, Error> {
     let input: MagicLinkToken = parse_json(&body)?;
-    let cart = header_str(&headers, CART_HEADER);
-    let anon = header_str(&headers, CONSENT_SUBJECT_HEADER);
     let signed = with_ctx(&s, &shopper, async |tx, ctx| {
-        customers::consume_magic_link(tx, ctx, &input.token, cart, anon).await
+        customers::consume_magic_link(tx, ctx, &input.token).await
     })
     .await?;
     signed_in(signed)
@@ -204,12 +195,10 @@ async fn login(
     body: Bytes,
 ) -> Result<Response, Error> {
     let input: PasswordLogin = parse_json(&body)?;
-    let cart = header_str(&headers, CART_HEADER);
-    let anon = header_str(&headers, CONSENT_SUBJECT_HEADER);
     // A failed attempt is committed (rate limit) before the 401.
-    let signed = with_ctx(&s, &shopper, async |tx, ctx| {
+    let signed = with_ctx(&s, &shopper, async |tx, _| {
         let ip = ip_hash(tx, &headers).await?;
-        customers::login(tx, ctx, &input, cart, anon, ip.as_deref()).await
+        customers::login(tx, &input, ip.as_deref()).await
     })
     .await?
     .ok_or(Error::Unauthorized {

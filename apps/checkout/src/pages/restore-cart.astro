@@ -18,6 +18,7 @@ const m = shop?.messages ?? {};
   shopUrl={shopUrl(Astro.url)}
   lang={shop?.locale ?? "cs"}
   accountLabel={t(m, "account.nav")}
+  accountUrl={shop?.account_url}
 >
   <div class="grid max-w-xl gap-4">
     <h1 class="font-display text-2xl font-bold">{t(m, "flows.restore_title")}</h1>

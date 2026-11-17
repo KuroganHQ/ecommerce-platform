@@ -337,16 +337,12 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /**
-         * The current choice: cookie purposes from the anonymous subject (this browser), email
-         *     purposes from the signed-in customer (checkout origin). `text_version: null` means no choice
-         *     yet.
-         */
+        /** The anonymous subject's current choice. `text_version: null` means no choice yet. */
         get: operations["get_consent"];
         put?: never;
         /**
-         * Records a choice for the anonymous subject (minted on the first choice) and, when signed in
-         *     on the checkout origin, for the customer. Answers the anonymous subject's new state.
+         * Records a choice for the anonymous subject (minted on the first choice) and answers its new
+         *     state.
          */
         post: operations["post_consent"];
         delete?: never;
@@ -3461,8 +3457,6 @@ export interface operations {
                 "X-Locale"?: string | null;
                 /** @description Anonymous subject id from the consent cookie (32 hex characters). */
                 "X-Consent-Subject"?: string | null;
-                /** @description Checkout origin only: the signed-in customer's session. */
-                "X-Customer-Session"?: string | null;
                 /** @description The client's IP (stored as a salted hash with the record). */
                 "X-Client-Ip"?: string | null;
                 /** @description The browser's user agent (ad platforms that require it, WP20). */
@@ -3495,8 +3489,6 @@ export interface operations {
                 "X-Locale"?: string | null;
                 /** @description Anonymous subject id from the consent cookie (32 hex characters). */
                 "X-Consent-Subject"?: string | null;
-                /** @description Checkout origin only: the signed-in customer's session. */
-                "X-Customer-Session"?: string | null;
                 /** @description The client's IP (stored as a salted hash with the record). */
                 "X-Client-Ip"?: string | null;
                 /** @description The browser's user agent (ad platforms that require it, WP20). */
@@ -3815,10 +3807,6 @@ export interface operations {
                 "X-Market": string;
                 /** @description Locale hint (one of the market's locales). */
                 "X-Locale"?: string | null;
-                /** @description Checkout cart capability (`__Host-cart`): the cart is attached to the customer (A4). */
-                "X-Cart-Token"?: string | null;
-                /** @description Anonymous consent subject (consent cookie): its choices move to the customer (A20). */
-                "X-Consent-Subject"?: string | null;
                 /** @description The client's IP (rate limits; stored only as a salted hash). */
                 "X-Client-Ip"?: string | null;
             };
@@ -3899,10 +3887,6 @@ export interface operations {
                 "X-Market": string;
                 /** @description Locale hint (one of the market's locales). */
                 "X-Locale"?: string | null;
-                /** @description Checkout cart capability (`__Host-cart`): the cart is attached to the customer (A4). */
-                "X-Cart-Token"?: string | null;
-                /** @description Anonymous consent subject (consent cookie): its choices move to the customer (A20). */
-                "X-Consent-Subject"?: string | null;
                 /** @description The client's IP (rate limits; stored only as a salted hash). */
                 "X-Client-Ip"?: string | null;
             };
@@ -3951,10 +3935,6 @@ export interface operations {
                 "X-Market": string;
                 /** @description Locale hint (one of the market's locales). */
                 "X-Locale"?: string | null;
-                /** @description Checkout cart capability (`__Host-cart`): the cart is attached to the customer (A4). */
-                "X-Cart-Token"?: string | null;
-                /** @description Anonymous consent subject (consent cookie): its choices move to the customer (A20). */
-                "X-Consent-Subject"?: string | null;
                 /** @description The client's IP (rate limits; stored only as a salted hash). */
                 "X-Client-Ip"?: string | null;
             };
@@ -4344,8 +4324,6 @@ export interface operations {
                 "X-Locale"?: string | null;
                 /** @description Anonymous subject id from the consent cookie (32 hex characters). */
                 "X-Consent-Subject"?: string | null;
-                /** @description Checkout origin only: the signed-in customer's session. */
-                "X-Customer-Session"?: string | null;
                 /** @description The client's IP (stored as a salted hash with the record). */
                 "X-Client-Ip"?: string | null;
                 /** @description The browser's user agent (ad platforms that require it, WP20). */

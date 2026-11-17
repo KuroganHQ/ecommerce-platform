@@ -1,14 +1,6 @@
-/**
- * Customer account on its own origin (SHOP-95, A1, A5, A20) against the seeded demo shop
- * (`make up && make seed`): email-link sign-in via Mailpit, addresses, password, sign-out,
- * password sign-in, email preferences; on the checkout origin, which still serves accounts until
- * SHOP-95 slice 2, the cart merge at sign-in and the theme's consent banner → the platform
- * record → the preferences page.
- */
-
 import { expect, type Page, test } from "@playwright/test";
 import { expectAccessible, mailpit, run } from "../admin/support";
-import { rateHeaders, testContext } from "../rate-client";
+import { testContext } from "../rate-client";
 import { ACCOUNT_SK, ACCOUNT as account, deferHydration } from "./support";
 
 const port = process.env.HTTP_PORT ?? "8080";
@@ -48,33 +40,6 @@ async function accountLink(to: string, since: Date): Promise<string> {
     await new Promise((r) => setTimeout(r, 500));
   }
   throw new Error(`no sign-in link for ${to}`);
-}
-
-/** Puts `quantity` of a seeded variant into a new shop-origin cart and hands it to checkout. */
-async function cartToCheckout(quantity: number): Promise<void> {
-  await page.goto(`${shop}/`);
-  const product = await page.request.get(`${shop}/_p/public/pages/product/tricko-basic`, {
-    headers: rateHeaders(page),
-  });
-  expect(product.ok()).toBe(true);
-  const model = (await product.json()) as { product: { variants: { id: string }[] } };
-  const variant = model.product.variants[0]?.id;
-  const added = await page.request.post(`${shop}/_p/cart/lines`, {
-    headers: { origin: shop, ...rateHeaders(page) },
-    data: { variant_id: variant, quantity },
-  });
-  expect(added.status()).toBe(200);
-  // The handoff is a same-site navigation (A1): a form post from the shop page.
-  await Promise.all([
-    page.waitForURL(`${checkout}/`),
-    page.evaluate(() => {
-      const form = document.createElement("form");
-      form.method = "post";
-      form.action = "/_p/checkout/start";
-      document.body.append(form);
-      form.submit();
-    }),
-  ]);
 }
 
 test("email-link sign-in on the account origin creates the account", async () => {
@@ -223,28 +188,24 @@ test("email_preferences_save_and_reload", async () => {
   await expect(page.getByRole("checkbox", { name: "E-mailový marketing" })).not.toBeChecked();
 });
 
-test("password sign-in on the checkout origin merges the new cart with the account's earlier one", async () => {
-  await cartToCheckout(1);
-  await page.goto(`${checkout}/account?next=/`);
-  await page.locator("summary", { hasText: "Heslem" }).click();
-  await page.locator("details form").getByLabel("E-mail").fill(email);
-  await page.locator("details form").getByLabel("Heslo").fill(password);
-  await page.locator("details form").getByRole("button", { name: "Přihlásit se" }).click();
-  await page.waitForURL(`${checkout}/`);
-  await page.context().clearCookies({ name: "__Host-sid" });
-  await cartToCheckout(2);
-  await page.goto(`${checkout}/account?next=/`);
-  await page.locator("summary", { hasText: "Heslem" }).click();
-  const form = page.locator("details form");
-  await form.getByLabel("E-mail").fill(email);
-  await form.getByLabel("Heslo").fill("wrong password!!");
-  await form.getByRole("button", { name: "Přihlásit se" }).click();
-  await expect(page.getByRole("alert")).toHaveText("E-mail nebo heslo nesedí.");
-  await form.getByLabel("Heslo").fill(password);
-  await form.getByRole("button", { name: "Přihlásit se" }).click();
-  // Redirected to the checkout (`next=/`) with both carts merged by variant: 1 + 2.
-  await page.waitForURL(`${checkout}/`);
-  await expect(page.getByRole("complementary")).toContainText("3× Tričko Basic");
+test("old_account_links_land_on_account_origin", async () => {
+  const token = "a".repeat(64);
+  for (const [from, path] of [
+    [checkout, "/account"],
+    [checkout, "/account/addresses"],
+    [checkout, `/account/verify?token=${token}`],
+    [shop, "/account/security"],
+  ] as const) {
+    await page.goto(`${from}${path}`);
+    await expect(page).toHaveURL(`${account}${path}`);
+  }
+  for (const from of [checkout, shop]) {
+    const res = await page.request.get(`${from}/account`, { maxRedirects: 0 });
+    expect(res.status()).toBe(308);
+    expect(res.headers()["cache-control"]).toBe("no-store");
+  }
+  for (const path of ["/_p/account/me", "/cs/account"])
+    expect((await page.request.get(`${checkout}${path}`, { maxRedirects: 0 })).status()).toBe(404);
 });
 
 test("the theme's consent banner is recorded, then changed on the preferences page", async () => {

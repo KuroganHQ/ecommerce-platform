@@ -35,12 +35,26 @@ beforeAll(async () => {
     "_checkout/0123456789abcdef/checkout.js": "1",
   });
   api = fakeApi();
-  const shop = site({ theme_artifact: theme.id });
+  const shop = site({ theme_artifact: theme.id, account_host: "demo.accounts.localhost" });
   gw = createGateway({
     artifactRoot: root,
     resolver: new StaticResolver({
       "demo.localhost": shop,
       "demo.accounts.localhost": { ...shop, kind: "account" },
+      "so.localhost": {
+        ...shop,
+        shop_host: "so.localhost",
+        account_host: "sk--demo.accounts.localhost",
+        checkout_origins: [
+          {
+            origin: "http://so.localhost:8280",
+            mode: "same_origin",
+            mode_generation: 1,
+            checkout_origin: "http://so.localhost:8280",
+          },
+        ],
+      },
+      "noacc.localhost": { ...shop, shop_host: "noacc.localhost", account_host: undefined },
     }),
     checkoutArtifact: checkout.id,
     apiOrigin: "http://api.test",
@@ -179,6 +193,16 @@ describe("account origin (SHOP-95 slice 1, A1)", () => {
       expect(call?.url).toBe("http://api.test/storefront/v1/customer/consent");
       expect(call?.headers["x-customer-session"]).toBe("sessiontoken_000000000001");
     }
+
+    await post(`/_p/account/orders/${ORDER}/withdrawal`, {
+      ...sameOrigin,
+      origin: ACC,
+      cookie: SESSION,
+    });
+    expect(api.calls.at(-1)).toMatchObject({
+      url: `http://api.test/storefront/v1/customer/orders/${ORDER}/withdrawal`,
+      headers: { "x-customer-session": "sessiontoken_000000000001" },
+    });
   });
 
   test("account_api_rejects_missing_fetch_metadata", async () => {
@@ -223,5 +247,101 @@ describe("account origin (SHOP-95 slice 1, A1)", () => {
     for (const res of responses) {
       for (const name of res.headers.keys()) expect(name).not.toMatch(/^access-control-/);
     }
+  });
+});
+
+const CO = "http://checkout.demo.localhost:8280";
+const LEGACY = [
+  "/account",
+  "/account/addresses",
+  "/account/security",
+  `/account/orders/${ORDER}`,
+  `/account/verify?token=${"a".repeat(64)}&next=%2Faccount`,
+];
+
+const expectRedirect = async (res: Response, location: string) => {
+  expect(res.status, location).toBe(308);
+  expect(res.headers.get("location")).toBe(location);
+  expect(res.headers.get("cache-control")).toBe("no-store");
+  expect(await res.text()).toBe("");
+};
+
+describe("legacy account routes (SHOP-95 slice 2)", () => {
+  test("checkout_host_account_paths_redirect_to_account_origin", async () => {
+    api.calls.length = 0;
+    for (const p of LEGACY)
+      await expectRedirect(await get(`${CO}${p}`, { cookie: SESSION }), `${ACC}${p}`);
+    expect(api.calls).toEqual([]);
+    for (const p of ["/_p/account/me", "/_p/account/login", "/_p/account/consent"]) {
+      expect((await get(`${CO}${p}`, { ...sameOrigin, cookie: SESSION })).status, p).toBe(404);
+      const body = "{}";
+      const headers = { ...sameOrigin, origin: CO, "content-type": "application/json" };
+      expect((await get(`${CO}${p}`, headers, { method: "POST", body })).status, p).toBe(404);
+    }
+    expect(api.calls).toEqual([]);
+  });
+
+  test("shop_origin_account_paths_redirect", async () => {
+    for (const p of LEGACY) await expectRedirect(await get(`${SHOP}${p}`), `${ACC}${p}`);
+    const so = "http://so.localhost:8280";
+    const other = "http://sk--demo.accounts.localhost:8280";
+    for (const p of LEGACY) await expectRedirect(await get(`${so}${p}`), `${other}${p}`);
+    for (const p of ["/cs/account", "/account/", "/account/other", "/accounts"])
+      expect((await get(`${SHOP}${p}`)).status, p).toBe(404);
+    for (const base of ["http://noacc.localhost:8280", "http://checkout.noacc.localhost:8280"])
+      expect((await get(`${base}/account`)).status, base).toBe(404);
+  });
+
+  test("legacy_redirect_ignores_raw_path", async () => {
+    for (const base of [SHOP, CO]) {
+      for (const p of [
+        "//attacker.example/account",
+        "/account//attacker.example",
+        "/account/%2F%2Fattacker.example",
+        "/account%2F..%2F..%2Fattacker.example",
+        "/account%2faddresses",
+        "/%61ccount",
+        "/account/./security/../addresses/..%2F",
+        "/Account",
+        "/account/orders/..%2F..%2Fattacker.example",
+        "/account\\attacker.example",
+      ]) {
+        const res = await get(`${base}${p}`);
+        const location = res.headers.get("location");
+        if (location !== null) expect(new URL(location).origin, `${base}${p}`).toBe(ACC);
+        if (location !== null) expect(LEGACY.map((l) => `${ACC}${l}`)).toContain(location);
+      }
+    }
+  });
+
+  test("checkout_never_forwards_session", async () => {
+    const cookie = `${SESSION}; __Host-cart=checkouttoken_000000000001; __Secure-consent_id=${"a".repeat(32)}`;
+    const attempt = "0199a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b";
+    const json = { origin: CO, "content-type": "application/json", cookie };
+    api.calls.length = 0;
+    await get(`${CO}/`, { cookie });
+    await get(`${CO}/consent`, { cookie });
+    await get(`${CO}/_p/checkout`, { cookie });
+    await get(`${CO}/_p/checkout/place-order`, json, { method: "POST", body: "{}" });
+    await get(`${CO}/_p/orders/${"a".repeat(64)}`, { cookie });
+    await get(`${CO}/_p/withdraw`, json, { method: "POST", body: "{}" });
+    await get(`${CO}/_p/fake-pay/${attempt}`, { cookie });
+    await get(
+      `${CO}/_p/fake-pay/${attempt}`,
+      { ...json, "content-type": "application/x-www-form-urlencoded" },
+      {
+        method: "POST",
+        body: "outcome=succeeded",
+      },
+    );
+    await get(`${CO}/_p/consent`, { cookie });
+    await get(`${CO}/_p/consent`, json, { method: "POST", body: "{}" });
+    for (const path of ["/checkout", "/orders/", "/withdrawals", "/checkout/fake-pay/", "/consent"])
+      expect(
+        api.calls.some((c) => c.url.includes(`/storefront/v1${path}`)),
+        path,
+      ).toBe(true);
+    for (const call of api.calls)
+      expect(call.headers["x-customer-session"], `${call.method} ${call.url}`).toBeUndefined();
   });
 });

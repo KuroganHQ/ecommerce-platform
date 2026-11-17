@@ -17,21 +17,15 @@ fn hash(password: &str) -> String {
         .to_string()
 }
 
-async fn login(db: &PgPool, tenant: Uuid, market: Uuid, password: &str) -> bool {
+async fn login(db: &PgPool, tenant: Uuid, password: &str) -> bool {
     let mut tx = tenant_tx(db, tenant).await.unwrap();
-    let ctx = storefront::context(&mut tx, &PublicUrls::default(), market, None, Utc::now())
-        .await
-        .unwrap();
     let out = customers::login(
         &mut tx,
-        &ctx,
         &PasswordLogin {
             email: "race@example.test".into(),
             password: password.into(),
             redirect: None,
         },
-        None,
-        None,
         None,
     )
     .await
@@ -67,14 +61,13 @@ async fn an_old_password_cannot_sign_in_across_a_concurrent_change(db: PgPool) {
         .execute(&mut *change)
         .await
         .unwrap();
-    let (db2, tenant, market) = (runtime.clone(), shop.tenant, shop.cz);
-    let attempt =
-        tokio::spawn(async move { login(&db2, tenant, market, "old password 123").await });
+    let (db2, tenant) = (runtime.clone(), shop.tenant);
+    let attempt = tokio::spawn(async move { login(&db2, tenant, "old password 123").await });
     tokio::time::sleep(Duration::from_millis(300)).await;
     assert!(!attempt.is_finished(), "login waits for the change");
     change.commit().await.unwrap();
     assert!(!attempt.await.unwrap(), "the old password no longer works");
-    assert!(login(&runtime, shop.tenant, shop.cz, "new password 456").await);
+    assert!(login(&runtime, shop.tenant, "new password 456").await);
 }
 
 #[sqlx::test(migrations = "../../migrations")]

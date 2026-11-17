@@ -668,58 +668,61 @@ async fn checkout_cart(c: &Ctx, variant: Uuid, quantity: i32) -> String {
 }
 
 #[sqlx::test(migrations = "../../migrations")]
-async fn sign_in_attaches_the_checkout_cart_and_merges_older_ones(db: PgPool) {
+async fn sign_in_leaves_carts_alone(db: PgPool) {
     let c = setup(db).await;
     let [v1, v2] = c.shop.variants;
     let first = checkout_cart(&c, v1, 2).await;
-    c.sign_in("m@example.test", &[("x-cart-token", first.clone())])
+    let second = checkout_cart(&c, v2, 1).await;
+    let (_, _, res) = c
+        .call(Call::post(
+            "/storefront/v1/consent",
+            json!({"purposes": {"analytics": true}, "text_version": "2026-09-25"}),
+        ))
         .await;
-
-    // Later, on another device: a new anonymous cart, then sign-in again.
-    let second = checkout_cart(&c, v1, 1).await;
-    let (status, _, _) = c
-        .call(
-            Call::post("/storefront/v1/cart/lines", json!({"variant_id": v2}))
-                .header("x-cart-token", second.clone()),
+    let subject = res.headers()["x-consent-subject"]
+        .to_str()
+        .unwrap()
+        .to_owned();
+    for cart in [&first, &second] {
+        c.sign_in(
+            "m@example.test",
+            &[
+                ("x-cart-token", cart.clone()),
+                ("x-consent-subject", subject.clone()),
+            ],
         )
         .await;
-    assert_ne!(
-        status,
-        StatusCode::OK,
-        "checkout capability is read-only until WP10"
-    );
-    c.sign_in("m@example.test", &[("x-cart-token", second.clone())])
-        .await;
+    }
 
-    let (status, cart, _) = c
-        .call(Call::get("/storefront/v1/cart").header("x-cart-token", second))
-        .await;
-    assert_eq!(status, StatusCode::OK);
-    let lines = cart["lines"].as_array().unwrap();
-    assert_eq!(lines.len(), 1);
-    assert_eq!(lines[0]["variant_id"], json!(v1));
-    assert_eq!(lines[0]["quantity"], 3, "lines merged by variant");
-    // The older cart is closed; its capability is dead.
-    let (status, _, _) = c
-        .call(Call::get("/storefront/v1/cart").header("x-cart-token", first))
-        .await;
-    assert_eq!(status, StatusCode::NOT_FOUND);
+    for (cart, variant, quantity) in [(first, v1, 2), (second, v2, 1)] {
+        let (status, body, _) = c
+            .call(Call::get("/storefront/v1/cart").header("x-cart-token", cart))
+            .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        let lines = body["lines"].as_array().unwrap();
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0]["variant_id"], json!(variant));
+        assert_eq!(lines[0]["quantity"], quantity);
+    }
     let mut tx = platform::db::tenant_tx(&c.runtime, c.shop.tenant)
         .await
         .unwrap();
-    let statuses: Vec<(String, bool)> =
+    let carts: Vec<(String, bool)> =
         sqlx::query_as("SELECT status, customer_id IS NOT NULL FROM carts ORDER BY created_at")
             .fetch_all(&mut *tx)
             .await
             .unwrap();
-    assert_eq!(
-        statuses,
-        vec![("merged".into(), true), ("open".into(), true)]
-    );
+    assert_eq!(carts, vec![("open".into(), false), ("open".into(), false)]);
+    let customer_records: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM consent_records WHERE subject_type = 'customer'")
+            .fetch_one(&mut *tx)
+            .await
+            .unwrap();
+    assert_eq!(customer_records, 0, "the anonymous subject is not linked");
 }
 
 #[sqlx::test(migrations = "../../migrations")]
-async fn consent_is_recorded_resolved_and_linked_at_sign_in(db: PgPool) {
+async fn consent_is_recorded_and_resolved_for_the_anonymous_subject(db: PgPool) {
     let c = setup(db).await;
     // First choice on the shop origin: a subject is minted and returned.
     let (status, state, res) = c
@@ -770,57 +773,19 @@ async fn consent_is_recorded_resolved_and_linked_at_sign_in(db: PgPool) {
         assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
     }
 
-    // Sign-in copies the anonymous choices to the customer; the server resolves from records.
-    let (session, body) = c
-        .sign_in("k@example.test", &[("x-consent-subject", subject.clone())])
-        .await;
-    let customer = Uuid::parse_str(body["customer"]["id"].as_str().unwrap()).unwrap();
-    let mut tx = platform::db::tenant_tx(&c.runtime, c.shop.tenant)
-        .await
-        .unwrap();
-    let who = commerce::consent::Subject::Customer(customer);
-    use commerce::consent::{ConsentPurpose as P, current};
-    assert!(!current(&mut tx, &who, P::Analytics).await.unwrap());
-    assert!(current(&mut tx, &who, P::Personalization).await.unwrap());
-    assert!(
-        !current(&mut tx, &who, P::EmailMarketing).await.unwrap(),
-        "no record = no consent"
-    );
-    tx.commit().await.unwrap();
-
-    // Signed in on the checkout origin, the choice is recorded for the customer too.
-    let (_, _, _) = c
+    let (session, _) = c.sign_in("k@example.test", &[]).await;
+    let (status, _, _) = c
         .call(
             Call::post("/storefront/v1/consent", json!({"purposes": {"email_marketing": true}, "text_version": "2026-09-25", "source": "preferences"}))
-                .header("x-consent-subject", subject)
+                .header("x-consent-subject", subject.clone())
                 .header("x-customer-session", session.clone()),
         )
         .await;
-    let (_, mine, _) = c
-        .call(Call::get("/storefront/v1/consent").header("x-customer-session", session.clone()))
+    assert_eq!(status, StatusCode::OK);
+    let (_, signed_in, _) = c
+        .call(Call::get("/storefront/v1/consent").header("x-customer-session", session))
         .await;
-    assert_eq!(mine["purposes"]["email_marketing"], true);
-    assert_eq!(mine["purposes"]["personalization"], true);
-    // With both: this browser's cookie purposes, the account's email purposes.
-    let fresh = commerce::consent::new_anon_id();
-    c.call(
-        Call::post(
-            "/storefront/v1/consent",
-            json!({"purposes": {"analytics": true}, "text_version": "2026-09-25"}),
-        )
-        .header("x-consent-subject", fresh.clone()),
-    )
-    .await;
-    let (_, both, _) = c
-        .call(
-            Call::get("/storefront/v1/consent")
-                .header("x-consent-subject", fresh)
-                .header("x-customer-session", session.clone()),
-        )
-        .await;
-    assert_eq!(both["purposes"]["analytics"], true);
-    assert_eq!(both["purposes"]["personalization"], Value::Null);
-    assert_eq!(both["purposes"]["email_marketing"], true);
+    assert_eq!(signed_in["text_version"], Value::Null);
     let mut tx = platform::db::tenant_tx(&c.runtime, c.shop.tenant)
         .await
         .unwrap();
@@ -835,7 +800,13 @@ async fn consent_is_recorded_resolved_and_linked_at_sign_in(db: PgPool) {
             .unwrap(),
     );
     assert!(ip_hashes > 0);
-    assert_eq!(sources, ["banner", "linked", "preferences"]);
+    assert_eq!(sources, ["banner", "preferences"]);
+    let customer_records: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM consent_records WHERE subject_type = 'customer'")
+            .fetch_one(&mut *tx)
+            .await
+            .unwrap();
+    assert_eq!(customer_records, 0);
     // Append-only for the application.
     assert!(
         sqlx::query("UPDATE consent_records SET granted = true")

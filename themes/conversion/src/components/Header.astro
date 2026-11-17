@@ -21,7 +21,7 @@ interface Props {
 }
 const { shop, q } = Astro.props;
 const { t, href, pick, pluralKeys } = i18n(shop);
-const accountUrl = `${shop.checkout_url}/account`;
+const accountUrl = `${shop.account_url}/account`;
 const path = Astro.url.pathname;
 const current = (h: string) => path === h || path.startsWith(`${h}/`);
 const CART_KEYS = [

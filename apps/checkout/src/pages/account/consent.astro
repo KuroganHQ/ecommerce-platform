@@ -17,6 +17,7 @@ const m = shop?.messages ?? {};
   {...accountLinks(shop, Astro.url)}
   lang={shop?.locale ?? "cs"}
   accountLabel={t(m, "account.nav")}
+  accountUrl={shop?.account_url}
 >
   <div class="grid max-w-xl gap-4">
     <a href="/account" class="text-sm text-identity-ink underline">← {t(m, "account.back")}</a>

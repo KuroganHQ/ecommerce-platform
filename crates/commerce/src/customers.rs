@@ -26,9 +26,6 @@ use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;
 
 use crate::capability;
-use crate::cart;
-use crate::checkout_access;
-use crate::consent;
 use crate::markets::invalid;
 use crate::notifications::{self, Brand, Email, Template};
 use crate::staff::normalize_email;
@@ -436,8 +433,6 @@ pub async fn consume_magic_link(
     tx: &mut TenantTx,
     ctx: &Context,
     token: &str,
-    cart_token: Option<&str>,
-    consent_subject: Option<&str>,
 ) -> Result<SignedIn, Error> {
     let invalid_link = || Error::BadRequest {
         code: "invalid_magic_link",
@@ -493,7 +488,6 @@ pub async fn consume_magic_link(
     )
     .await?;
     let session_token = create_session(tx, c.id, true).await?;
-    after_sign_in(tx, ctx, c.id, cart_token, consent_subject).await?;
     let session = authenticate(tx, &session_token)
         .await?
         .ok_or_else(|| Error::Internal("new session not found".into()))?;
@@ -504,28 +498,6 @@ pub async fn consume_magic_link(
     })
 }
 
-/// Cart merge (A4) and consent linking after any sign-in.
-async fn after_sign_in(
-    tx: &mut TenantTx,
-    ctx: &Context,
-    customer_id: Uuid,
-    cart_token: Option<&str>,
-    consent_subject: Option<&str>,
-) -> Result<(), Error> {
-    if let Some(token) = cart_token {
-        match checkout_access::open(tx, ctx, token).await {
-            Ok(c) => cart::attach_to_customer(tx, &c, customer_id).await?,
-            // An expired or foreign cart capability just means there is nothing to attach.
-            Err(Error::NotFound) => {}
-            Err(e) => return Err(e),
-        }
-    }
-    if let Some(anon) = consent_subject {
-        consent::link_anonymous(tx, anon, customer_id).await?;
-    }
-    Ok(())
-}
-
 // ---------------------------------------------------------------------------------------
 // Password sign-in
 
@@ -533,10 +505,7 @@ async fn after_sign_in(
 /// the caller must commit before answering `401`). `429` after too many failures.
 pub async fn login(
     tx: &mut TenantTx,
-    ctx: &Context,
     input: &PasswordLogin,
-    cart_token: Option<&str>,
-    consent_subject: Option<&str>,
     ip_hash: Option<&[u8]>,
 ) -> Result<Option<SignedIn>, Error> {
     let Ok(email) = normalize_email(&input.email) else {
@@ -570,7 +539,6 @@ pub async fn login(
         return Ok(None);
     };
     let session_token = create_session(tx, customer_id, false).await?;
-    after_sign_in(tx, ctx, customer_id, cart_token, consent_subject).await?;
     let session = authenticate(tx, &session_token)
         .await?
         .ok_or_else(|| Error::Internal("new session not found".into()))?;

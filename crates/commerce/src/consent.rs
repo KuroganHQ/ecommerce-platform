@@ -5,7 +5,7 @@
 //! trusted.
 //!
 //! Subjects: `anon` (a random id in the first-party consent cookie, set only after a choice),
-//! `customer` (after sign-in the anonymous choices are copied over, [`link_anonymous`]) and
+//! `customer` (email purposes chosen on the account origin or at checkout placement) and
 //! `email` (consents given with an address but without an account).
 
 use platform::Error;
@@ -485,32 +485,6 @@ pub async fn latest_any(
     )
     .fetch_optional(&mut **tx)
     .await?)
-}
-
-/// At sign-in: the anonymous subject's choices that are newer than the customer's own become
-/// the customer's (source `linked`), keeping the time the choice was made, so the latest
-/// decision of the person wins however the sign-ins interleave.
-pub async fn link_anonymous(tx: &mut TenantTx, anon: &str, customer: Uuid) -> Result<(), Error> {
-    if !well_formed_anon(anon) {
-        return Ok(());
-    }
-    sqlx::query!(
-        "INSERT INTO consent_records (tenant_id, subject_type, subject_id, purpose, granted,
-                                      text_version, source, ip_hash, at)
-         SELECT a.tenant_id, 'customer', $2, a.purpose, a.granted, a.text_version, 'linked', NULL, a.at
-         FROM (SELECT DISTINCT ON (purpose) tenant_id, purpose, granted, text_version, at
-               FROM consent_records WHERE subject_type = 'anon' AND subject_id = $1
-               ORDER BY purpose, at DESC, id DESC) a
-         WHERE NOT EXISTS (
-             SELECT 1 FROM consent_records c
-             WHERE c.subject_type = 'customer' AND c.subject_id = $2 AND c.purpose = a.purpose
-               AND c.at >= a.at)",
-        anon,
-        customer.to_string()
-    )
-    .execute(&mut **tx)
-    .await?;
-    Ok(())
 }
 
 /// The script-readable summary the edge stores in the `consent` cookie, in the SDK's format
