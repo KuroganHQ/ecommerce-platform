@@ -201,6 +201,9 @@ fn webhooks(ops: &OpsConfig, env: AppEnv) -> anyhow::Result<Option<commerce::web
     }))
 }
 
+/// `POST /signup` requests per client IP and hour.
+const SIGNUPS_PER_HOUR: u32 = 5;
+
 async fn serve() -> anyhow::Result<()> {
     init_tracing()?;
     let cfg = ApiConfig::from_env()?;
@@ -246,7 +249,20 @@ async fn serve() -> anyhow::Result<()> {
     if experiments.is_none() {
         tracing::warn!("EXPERIMENTS_SECRET not set: nobody is enrolled in A/B experiments");
     }
+    let billing = commerce::billing::Billing::new(
+        checkout.payments.stripe.as_ref(),
+        &platform::config::BillingConfig::from_env()?,
+    );
+    if billing.is_none() {
+        tracing::warn!("BILLING_PLANS or Stripe not set: store billing answers 503");
+    }
     let state = api::AppState {
+        self_signup: cfg.self_signup.then(|| {
+            Arc::new(api::rate_limit::StorefrontLimiter::per_hour(
+                SIGNUPS_PER_HOUR,
+            ))
+        }),
+        billing,
         fetch: platform::http::SafeClient::from_env()?,
         same_origin_ready: checkout_cfg.same_origin_ready,
         experiments,
@@ -307,10 +323,14 @@ async fn serve() -> anyhow::Result<()> {
             .map(api::auth::ServiceToken::new),
     };
     let limiter = state.rate_limit.clone();
+    let signup_limiter = state.self_signup.clone();
     tokio::spawn(async move {
         loop {
             tokio::time::sleep(Duration::from_secs(60)).await;
             limiter.prune();
+            if let Some(l) = &signup_limiter {
+                l.prune();
+            }
         }
     });
     let (stop, shutdown) = tokio::sync::watch::channel(false);

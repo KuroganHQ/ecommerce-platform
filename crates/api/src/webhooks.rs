@@ -31,6 +31,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
         .routes(routes!(fake_webhook))
         .routes(routes!(stripe_webhook))
+        .routes(routes!(stripe_billing_webhook))
         .routes(routes!(ses_webhook))
 }
 
@@ -72,6 +73,41 @@ async fn stripe_webhook(
             code: "invalid_signature",
         })?;
     let new = stripe::receive(&s.db, stripe, signature, &body).await?;
+    Ok(Json(Received {
+        received: true,
+        new,
+    }))
+}
+
+/// Stripe billing webhook (SHOP-45): subscription events of the platform's own account, signed
+/// with `STRIPE_BILLING_WEBHOOK_SECRET`. Stored like Connect events and processed by
+/// `billing.stripe_event`. `404` when billing is not set up.
+#[utoipa::path(
+    post,
+    path = "/webhooks/stripe/billing",
+    tag = "webhooks",
+    params(("Stripe-Signature" = String, Header)),
+    request_body(content = String, content_type = "application/json", description = "A Stripe event"),
+    responses(
+        (status = 200, body = Received),
+        (status = 401, description = "invalid_signature", body = platform::Problem, content_type = "application/problem+json"),
+        (status = 404, body = platform::Problem, content_type = "application/problem+json"),
+        (status = 422, description = "invalid_event", body = platform::Problem, content_type = "application/problem+json"),
+    )
+)]
+async fn stripe_billing_webhook(
+    State(s): State<AppState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<Json<Received>, Error> {
+    let billing = s.billing.as_ref().ok_or(Error::NotFound)?;
+    let signature = headers
+        .get(STRIPE_SIGNATURE_HEADER)
+        .and_then(|v| v.to_str().ok())
+        .ok_or(Error::Unauthorized {
+            code: "invalid_signature",
+        })?;
+    let new = commerce::billing::receive(&s.db, billing, signature, &body).await?;
     Ok(Json(Received {
         received: true,
         new,

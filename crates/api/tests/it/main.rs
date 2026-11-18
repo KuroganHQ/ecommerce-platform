@@ -25,6 +25,7 @@ mod review_summaries;
 mod reviews;
 mod same_origin_checkout_start;
 mod search;
+mod signup_billing;
 mod staff;
 mod storefront;
 mod themes;
