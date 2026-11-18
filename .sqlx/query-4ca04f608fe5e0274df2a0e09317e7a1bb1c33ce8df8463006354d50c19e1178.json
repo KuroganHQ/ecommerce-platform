@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO platform.subscriptions (tenant_id, stripe_customer_id) VALUES ($1, $2)\n         ON CONFLICT (tenant_id) DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "4ca04f608fe5e0274df2a0e09317e7a1bb1c33ce8df8463006354d50c19e1178"
+}

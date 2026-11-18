@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT stripe_subscription_id, status FROM platform.subscriptions\n         WHERE tenant_id = $1 FOR UPDATE",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "stripe_subscription_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "platform.subscriptions",
+            "name": "stripe_subscription_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "status",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "platform.subscriptions",
+            "name": "status"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      true,
+      true
+    ]
+  },
+  "hash": "aeaff5d69e82539c5602a5166ad926229a907364825917e13d4e32f6cd4c7ae0"
+}
