@@ -335,6 +335,10 @@ services:
       STRIPE_PUBLISHABLE_KEY: ${STRIPE_PUBLISHABLE_KEY:-}
       STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-whsec_local_simulator_0123456789}
       STRIPE_MOCK_URL: ${STRIPE_MOCK_URL:-http://stripe-mock:12111}
+      # SHOP-45: self-signup and store billing (stripe-mock's price locally).
+      SELF_SIGNUP: ${SELF_SIGNUP:-1}
+      BILLING_PLANS: ${BILLING_PLANS:-pro:price_1PgafmB7WZ01zgkW6dKueIc5}
+      STRIPE_BILLING_WEBHOOK_SECRET: ${STRIPE_BILLING_WEBHOOK_SECRET:-whsec_local_billing_0123456789}
       # WP18: HTTP Basic password of POST /webhooks/ses (SES bounces/complaints via SNS).
       MAIL_EVENTS_SECRET: ${MAIL_EVENTS_SECRET:-local-mail-events-secret-0123456789abcdef}
       MAIL_EVENTS_TOPIC_ARNS: ${MAIL_EVENTS_TOPIC_ARNS:-}
@@ -402,6 +406,9 @@ services:
       STRIPE_PUBLISHABLE_KEY: ${STRIPE_PUBLISHABLE_KEY:-}
       STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-whsec_local_simulator_0123456789}
       STRIPE_MOCK_URL: ${STRIPE_MOCK_URL:-http://stripe-mock:12111}
+      # SHOP-45: billing events re-read subscriptions with these.
+      BILLING_PLANS: ${BILLING_PLANS:-pro:price_1PgafmB7WZ01zgkW6dKueIc5}
+      STRIPE_BILLING_WEBHOOK_SECRET: ${STRIPE_BILLING_WEBHOOK_SECRET:-whsec_local_billing_0123456789}
       # WP12: carrier tracking, ČNB rates (local mocks) and PDF rendering (Typst in the image).
       PACKETA_API_URL: ${PACKETA_API_URL:-http://mocks:4010/packeta/api/rest}
       PACKETA_VALIDATE_URL: ${PACKETA_VALIDATE_URL:-http://mocks:4010/packeta/pps/api/widget/v1/validate}

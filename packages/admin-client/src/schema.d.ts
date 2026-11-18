@@ -513,6 +513,60 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/v1/billing": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The store's plan and subscription. */
+        get: operations["overview"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/billing/checkout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** A Stripe Checkout page subscribing the store to `plan` (login at most 15 minutes old). */
+        post: operations["checkout"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/billing/portal": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * The Stripe customer portal: card, invoices, plan changes and cancellation (login at most
+         *     15 minutes old).
+         */
+        post: operations["portal"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/v1/campaigns": {
         parameters: {
             query?: never;
@@ -2955,6 +3009,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/v1/stores": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Creates a store owned by the caller, like `api admin create-tenant`. One per user
+         *     (`409 store_limit_reached`); platform superadmins are not limited. `404` unless
+         *     `SELF_SIGNUP=1`.
+         */
+        post: operations["create_store"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/v1/subscribers": {
         parameters: {
             query?: never;
@@ -3707,6 +3782,27 @@ export interface paths {
         get: operations["readyz"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/signup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Whether self-signup is on. `404` when it is off. */
+        get: operations["signup_status"];
+        put?: never;
+        /**
+         * Mails a sign-in link to the address, creating the (unverified) user when new. The answer is
+         *     the same for every valid address. Rate-limited per client IP (`429 rate_limited`).
+         */
+        post: operations["signup"];
         delete?: never;
         options?: never;
         head?: never;
@@ -5356,6 +5452,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/webhooks/stripe/billing": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Stripe billing webhook (SHOP-45): subscription events of the platform's own account, signed
+         *     with `STRIPE_BILLING_WEBHOOK_SECRET`. Stored like Connect events and processed by
+         *     `billing.stripe_event`. `404` when billing is not set up.
+         */
+        post: operations["stripe_billing_webhook"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -6011,6 +6128,22 @@ export interface components {
          * @enum {string}
          */
         Basis: "equivalent" | "ended";
+        BillingOverview: {
+            cancel_at_period_end: boolean;
+            /** @description `false`: billing is not set up (`BILLING_PLANS`, Stripe); checkout and portal answer 503. */
+            configured: boolean;
+            /** Format: date-time */
+            current_period_end?: string | null;
+            /** @description The store's current plan (`standard` without a paid subscription). */
+            plan: string;
+            /** @description Plans the store can choose. */
+            plans: string[];
+            /**
+             * @description Stripe's subscription status (`active`, `past_due`, `canceled`, ...); `null` before the
+             *     first subscription.
+             */
+            status?: string | null;
+        };
         /** @description One block of a page. `type` selects the variant. */
         Block: {
             /** Format: int32 */
@@ -6507,6 +6640,10 @@ export interface components {
              */
             placed_as_guest: boolean;
         };
+        CheckoutRequest: {
+            /** @description One of the configured plans. */
+            plan: string;
+        };
         CheckoutStart: {
             /** @description The browser's current checkout capability (`__Host-Http-cart`), revoked by the start. */
             previous?: string | null;
@@ -6844,6 +6981,14 @@ export interface components {
         CreatedImport: {
             run: components["schemas"]["ImportRun"];
             upload?: components["schemas"]["UploadTarget"] | null;
+        };
+        CreatedStore: {
+            hostname: string;
+            /**
+             * Format: uuid
+             * @description Send as `X-Tenant-Id` to act in the new store.
+             */
+            tenant_id: string;
         };
         /**
          * @description Currencies used by EU markets: the euro and the member states' own currencies.
@@ -8494,6 +8639,11 @@ export interface components {
             target_locales?: string[];
             /** @description Descriptions only. */
             tone?: components["schemas"]["Tone"];
+        };
+        NewStore: {
+            name: string;
+            /** @description The store's subdomain: 1-63 lowercase letters, digits or single inner hyphens. */
+            slug: string;
         };
         NewSubscription: {
             active?: boolean;
@@ -10305,6 +10455,16 @@ export interface components {
             /** @description Relative path on the checkout origin to continue to. */
             redirect: string;
         };
+        SignupAccepted: {
+            /** @description Always `true`: whether the address already had an account is not revealed. */
+            accepted: boolean;
+        };
+        SignupRequest: {
+            email: string;
+        };
+        SignupStatus: {
+            enabled: boolean;
+        };
         SimulateAccountInput: {
             /**
              * @description `true`: onboarding completed (charges enabled, card payments active); `false`: the
@@ -10443,6 +10603,10 @@ export interface components {
         };
         /** @enum {string} */
         StripePlatformMode: "live" | "test" | "simulator";
+        StripeRedirect: {
+            /** @description The Stripe-hosted page to send the owner to. */
+            url: string;
+        };
         StripeStatus: {
             account?: components["schemas"]["StripeAccount"] | null;
             mode?: components["schemas"]["StripePlatformMode"] | null;
@@ -12210,6 +12374,169 @@ export interface operations {
             };
             /** @description invalid_resolution */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    overview: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description The tenant to act in; the caller must be a member. */
+                "X-Tenant-Id": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BillingOverview"];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    checkout: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description The tenant to act in; the caller must be a member. */
+                "X-Tenant-Id": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CheckoutRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StripeRedirect"];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description subscription_exists */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description unknown_plan */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description billing_not_configured */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    portal: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description The tenant to act in; the caller must be a member. */
+                "X-Tenant-Id": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StripeRedirect"];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description no_billing_account */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description billing_not_configured */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -19283,6 +19610,70 @@ export interface operations {
             };
         };
     };
+    create_store: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NewStore"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreatedStore"];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description store_limit_reached | already_exists */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
     list_subscribers: {
         parameters: {
             query?: {
@@ -21007,6 +21398,90 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Readiness"];
+                };
+            };
+        };
+    };
+    signup_status: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SignupStatus"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    signup: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SignupRequest"];
+            };
+        };
+        responses: {
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SignupAccepted"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description invalid_email */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description rate_limited */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
                 };
             };
         };
@@ -25487,6 +25962,58 @@ export interface operations {
         };
     };
     stripe_webhook: {
+        parameters: {
+            query?: never;
+            header: {
+                "Stripe-Signature": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        /** @description A Stripe event */
+        requestBody: {
+            content: {
+                "application/json": string;
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Received"];
+                };
+            };
+            /** @description invalid_signature */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description invalid_event */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    stripe_billing_webhook: {
         parameters: {
             query?: never;
             header: {
