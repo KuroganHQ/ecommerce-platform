@@ -397,10 +397,23 @@ test("coupon and sale: the order totals match the cart", async ({ browser }) => 
   await page.context().close();
 });
 
+function guestOrderLinkingSettled(email: string): boolean {
+  return (
+    sql(`SELECT NOT EXISTS (SELECT FROM queue.outbox o
+                            WHERE o.type = 'customer.email_verified' AND o.dispatched_at IS NULL
+                              AND o.payload ->> 'customer_id' = c.id::text)
+            AND NOT EXISTS (SELECT FROM queue.jobs j
+                            WHERE j.kind = 'orders.link_guest' AND j.status IN ('queued', 'running')
+                              AND j.payload #>> '{payload,customer_id}' = c.id::text)
+         FROM customers c WHERE c.email = '${email}'`) === "t"
+  );
+}
+
 test("checkout_is_guest_only_when_signed_in", async ({ browser }) => {
   const page = await newPage(browser);
   const email = `ucet-${run}@example.test`;
   await signIn(page, email, "/account");
+  await expect.poll(() => guestOrderLinkingSettled(email), { timeout: 20_000 }).toBe(true);
   await toCheckout(page, CZ, "tricko-henley");
   await checkoutReady(page);
   await expect(page.getByText(email)).toHaveCount(0);
