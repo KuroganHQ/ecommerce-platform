@@ -2665,7 +2665,8 @@ export const sk: Dictionary = {
     lead: "Zadajte e-mail. Pošleme vám odkaz na prihlásenie a založenie obchodu.",
     submit: "Poslať odkaz na prihlásenie",
     sentTitle: "Skontrolujte e-mail",
-    sentDesc: "Odkaz na prihlásenie sme poslali na {{email}}. Platí 15 minút. Otvorte ho a založte si obchod.",
+    sentDesc:
+      "Odkaz na prihlásenie sme poslali na {{email}}. Platí 15 minút. Otvorte ho a založte si obchod.",
     haveAccount: "Už máte účet? Prihláste sa",
     link: "Ste tu prvýkrát? Založte si obchod",
     storeTitle: "Založte si obchod",
@@ -2689,7 +2690,8 @@ export const sk: Dictionary = {
     manage: "Spravovať fakturáciu",
     checkoutDone: "Ďakujeme. Predplatné sa tu zobrazí, keď ho Stripe potvrdí.",
     notConfiguredTitle: "Fakturácia nie je nastavená",
-    notConfiguredDesc: "Platforma zatiaľ neponúka žiadne tarify. Váš obchod funguje ďalej bez zmeny.",
+    notConfiguredDesc:
+      "Platforma zatiaľ neponúka žiadne tarify. Váš obchod funguje ďalej bez zmeny.",
     statuses: {
       trialing: "Skúšobné obdobie",
       active: "Aktívne",

@@ -123,11 +123,7 @@ export default function Billing() {
                 when={!OPEN.includes(b.status ?? "")}
                 fallback={
                   <div>
-                    <Button
-                      variant="confirm"
-                      loading={redirect.isPending}
-                      onClick={() => go(null)}
-                    >
+                    <Button variant="confirm" loading={redirect.isPending} onClick={() => go(null)}>
                       {t("billing.manage")}
                     </Button>
                   </div>
@@ -154,7 +150,10 @@ export default function Billing() {
                 </Card>
                 <Show when={b.status}>
                   <div>
-                    <Button loading={redirect.isPending && redirect.variables === null} onClick={() => go(null)}>
+                    <Button
+                      loading={redirect.isPending && redirect.variables === null}
+                      onClick={() => go(null)}
+                    >
                       {t("billing.manage")}
                     </Button>
                   </div>

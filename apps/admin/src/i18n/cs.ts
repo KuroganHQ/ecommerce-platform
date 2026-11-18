@@ -2662,7 +2662,8 @@ export const cs: Dictionary = {
     lead: "Zadejte e-mail. Pošleme vám odkaz pro přihlášení a založení obchodu.",
     submit: "Poslat odkaz pro přihlášení",
     sentTitle: "Zkontrolujte e-mail",
-    sentDesc: "Odkaz pro přihlášení jsme poslali na {{email}}. Platí 15 minut. Otevřete ho a založte si obchod.",
+    sentDesc:
+      "Odkaz pro přihlášení jsme poslali na {{email}}. Platí 15 minut. Otevřete ho a založte si obchod.",
     haveAccount: "Už máte účet? Přihlaste se",
     link: "Jste tu poprvé? Založte si obchod",
     storeTitle: "Založte si obchod",

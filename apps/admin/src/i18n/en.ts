@@ -2655,7 +2655,8 @@ export const en = {
     lead: "Enter your email. We will send you a link to sign in and set up your store.",
     submit: "Email me a sign-in link",
     sentTitle: "Check your email",
-    sentDesc: "We sent a sign-in link to {{email}}. It is valid for 15 minutes. Open it to create your store.",
+    sentDesc:
+      "We sent a sign-in link to {{email}}. It is valid for 15 minutes. Open it to create your store.",
     haveAccount: "Already have an account? Sign in",
     link: "New here? Create a store",
     storeTitle: "Create your store",
