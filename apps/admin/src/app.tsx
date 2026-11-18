@@ -9,6 +9,7 @@ import { queryClient } from "./lib/api.ts";
 import { bootstrapSession, status } from "./lib/session.ts";
 import { Login } from "./pages/Login.tsx";
 import { ResetPassword } from "./pages/ResetPassword.tsx";
+import { Signup } from "./pages/Signup.tsx";
 
 const Dashboard = lazy(() => import("./pages/Dashboard.tsx"));
 const Products = lazy(() => import("./pages/Products.tsx"));
@@ -17,6 +18,7 @@ const Categories = lazy(() => import("./pages/Categories.tsx"));
 const Parameters = lazy(() => import("./pages/Parameters.tsx"));
 const Markets = lazy(() => import("./pages/Markets.tsx"));
 const Staff = lazy(() => import("./pages/Staff.tsx"));
+const Billing = lazy(() => import("./pages/Billing.tsx"));
 const AuditLog = lazy(() => import("./pages/AuditLog.tsx"));
 const Security = lazy(() => import("./pages/Security.tsx"));
 const PriceLists = lazy(() => import("./pages/PriceLists.tsx"));
@@ -102,6 +104,7 @@ export function App() {
       <Router root={Root}>
         <Route path="/login" component={Login} />
         <Route path="/reset-password" component={ResetPassword} />
+        <Route path="/signup" component={Signup} />
         <Route path="/" component={Protected}>
           <Route path="/" component={Dashboard} />
           <Route path="/insights" component={Insights} />
@@ -150,6 +153,7 @@ export function App() {
           <Route path="/settings/payments" component={PaymentMethods} />
           <Route path="/settings/tax" component={TaxProfile} />
           <Route path="/staff" component={Staff} />
+          <Route path="/billing" component={Billing} />
           <Route path="/audit-log" component={AuditLog} />
           <Route path="/settings/webhooks" component={Webhooks} />
           <Route path="/settings/ad-tracking" component={AdTracking} />
