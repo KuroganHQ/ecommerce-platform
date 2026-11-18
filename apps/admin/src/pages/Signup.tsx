@@ -5,7 +5,6 @@ import { errorMessage, t } from "../i18n/index.ts";
 import { requestSignup } from "../lib/signup.ts";
 import { AuthLayout } from "./Login.tsx";
 
-/** Self-signup: proves the email with a sign-in link; the store is created after sign-in. */
 export function Signup() {
   const [email, setEmail] = createSignal("");
   const [sent, setSent] = createSignal(false);

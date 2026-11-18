@@ -102,7 +102,6 @@ pub struct NewTenant<'a> {
     pub name: &'a str,
     pub owner_user_id: &'a str,
     pub owner_email: &'a str,
-    /// Self-signup's owner: at most one such tenant per user (`409 store_limit_reached`).
     pub signup_user_id: Option<&'a str>,
 }
 

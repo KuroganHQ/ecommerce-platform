@@ -8,7 +8,6 @@ import { errorMessage, formatDateTime, t } from "../i18n/index.ts";
 import { api, tenantHeader, unwrap } from "../lib/api.ts";
 import { tenantKey, useMembership } from "../lib/me.ts";
 
-/** Every Stripe subscription status (the database refuses others). */
 type Status = keyof Dictionary["billing"]["statuses"];
 
 const TONES: Partial<Record<Status, Tone>> = {
@@ -18,9 +17,6 @@ const TONES: Partial<Record<Status, Tone>> = {
   unpaid: "error",
   incomplete: "warning",
 };
-
-/** Statuses of a live subscription: plan changes go through the Stripe portal. */
-const OPEN = ["trialing", "active", "past_due", "unpaid", "paused"];
 
 export default function Billing() {
   const { can } = useMembership();
@@ -120,7 +116,7 @@ export default function Billing() {
                 </dl>
               </Card>
               <Show
-                when={!OPEN.includes(b.status ?? "")}
+                when={!b.subscription_open}
                 fallback={
                   <div>
                     <Button variant="confirm" loading={redirect.isPending} onClick={() => go(null)}>

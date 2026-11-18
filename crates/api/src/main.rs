@@ -201,7 +201,6 @@ fn webhooks(ops: &OpsConfig, env: AppEnv) -> anyhow::Result<Option<commerce::web
     }))
 }
 
-/// `POST /signup` requests per client IP and hour.
 const SIGNUPS_PER_HOUR: u32 = 5;
 
 async fn serve() -> anyhow::Result<()> {

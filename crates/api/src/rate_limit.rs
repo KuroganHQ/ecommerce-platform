@@ -35,7 +35,6 @@ impl StorefrontLimiter {
         )
     }
 
-    /// `n` per hour, all of them available at once.
     pub fn per_hour(n: u32) -> Self {
         Self::with_quota(Quota::per_hour(
             NonZeroU32::new(n).unwrap_or(NonZeroU32::MIN),

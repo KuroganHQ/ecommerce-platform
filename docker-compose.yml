@@ -406,7 +406,6 @@ services:
       STRIPE_PUBLISHABLE_KEY: ${STRIPE_PUBLISHABLE_KEY:-}
       STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-whsec_local_simulator_0123456789}
       STRIPE_MOCK_URL: ${STRIPE_MOCK_URL:-http://stripe-mock:12111}
-      # SHOP-45: billing events re-read subscriptions with these.
       BILLING_PLANS: ${BILLING_PLANS:-pro:price_1PgafmB7WZ01zgkW6dKueIc5}
       STRIPE_BILLING_WEBHOOK_SECRET: ${STRIPE_BILLING_WEBHOOK_SECRET:-whsec_local_billing_0123456789}
       # WP12: carrier tracking, ČNB rates (local mocks) and PDF rendering (Typst in the image).

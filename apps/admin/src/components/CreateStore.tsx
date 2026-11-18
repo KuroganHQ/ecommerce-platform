@@ -4,7 +4,6 @@ import { createSignal, Show } from "solid-js";
 import { errorMessage, t } from "../i18n/index.ts";
 import { api, setTenantId, unwrap } from "../lib/api.ts";
 
-/** The first store of a signed-in user without memberships (self-signup). */
 export function CreateStore() {
   const qc = useQueryClient();
   const [name, setName] = createSignal("");

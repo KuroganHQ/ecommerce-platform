@@ -12,7 +12,6 @@ use uuid::Uuid;
 
 const SECRET: &str = "whsec_billing_test_0123456789";
 
-/// Stripe's subscription retrieval, answering whatever the test last stored.
 async fn fake_stripe(subscription: Arc<RwLock<Value>>) -> String {
     let router = axum::Router::new().route(
         "/v1/subscriptions/{id}",
@@ -94,7 +93,6 @@ impl Fixture {
         });
     }
 
-    /// Delivers an event through the webhook path and processes the stored row.
     async fn deliver(&self, event_id: &str, kind: &str, object: Value) -> Processed {
         let raw = json!({ "id": event_id, "type": kind, "livemode": false, "data": { "object": object } })
             .to_string();
@@ -150,7 +148,6 @@ async fn subscription_events_set_the_plan_from_stripe(db: PgPool) {
     assert!(matches!(outcome, Processed::Applied(_)), "{outcome:?}");
     assert_eq!(f.plan().await, ("pro".into(), Some("active".into())));
 
-    // The event says "updated", but Stripe now says canceled: Stripe wins.
     f.set_subscription("canceled", "cus_ours").await;
     f.deliver(
         "evt_2",
@@ -160,7 +157,6 @@ async fn subscription_events_set_the_plan_from_stripe(db: PgPool) {
     .await;
     assert_eq!(f.plan().await, ("standard".into(), Some("canceled".into())));
 
-    // Processing a stored event again changes nothing.
     let id: Uuid =
         sqlx::query_scalar("SELECT id FROM platform.provider_events WHERE event_id = 'evt_1'")
             .fetch_one(&f.db)
@@ -184,7 +180,6 @@ async fn events_of_unknown_customers_are_ignored(db: PgPool) {
     assert_eq!(outcome, Processed::Ignored("unknown customer".into()));
     assert_eq!(f.plan().await.0, "standard");
 
-    // Our customer in the event, someone else's on the subscription Stripe returns.
     let outcome = f
         .deliver(
             "evt_y",

@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO platform.subscriptions (tenant_id, stripe_customer_id) VALUES ($1, $2)\n         ON CONFLICT (tenant_id) DO UPDATE SET tenant_id = EXCLUDED.tenant_id\n         RETURNING stripe_customer_id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "stripe_customer_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "platform.subscriptions",
+            "name": "stripe_customer_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "87b0f3d86e4b9f35671b6622e245d277c5a1e5297d1b9d361227c11ee4ed07d6"
+}

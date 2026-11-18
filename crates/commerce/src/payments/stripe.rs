@@ -87,7 +87,6 @@ impl Stripe {
         self.publishable_key.as_deref()
     }
 
-    /// The same account and key, verifying another webhook endpoint's events.
     pub fn with_webhook_secret(&self, secret: &str) -> Self {
         Self {
             webhook_secret: secret.as_bytes().to_vec(),
@@ -608,7 +607,6 @@ pub async fn receive(
     receive_for(db, stripe, signature, raw, EVENT_JOB).await
 }
 
-/// [`receive`], processed by the `job` kind (billing events have their own).
 pub(crate) async fn receive_for(
     db: &sqlx::PgPool,
     stripe: &Stripe,

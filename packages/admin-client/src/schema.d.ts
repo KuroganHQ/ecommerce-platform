@@ -6143,6 +6143,11 @@ export interface components {
              *     first subscription.
              */
             status?: string | null;
+            /**
+             * @description The subscription still exists: plan changes and cancellation go through the portal, and
+             *     checkout answers `409 subscription_exists`.
+             */
+            subscription_open: boolean;
         };
         /** @description One block of a page. `type` selects the variant. */
         Block: {

@@ -65,7 +65,6 @@ pub struct Extra {
     pub theme_builder: Option<ThemeBuilder>,
     /// WP12: carriers (tracking), the ČNB client and the Typst renderer.
     pub fulfillment: Option<Fulfillment>,
-    /// SHOP-45: store subscriptions; `None` when billing is not set up.
     pub billing: Option<commerce::billing::Billing>,
 }
 
@@ -393,7 +392,6 @@ async fn provider_event(ctx: Ctx, job: Job) -> Result<(), JobError> {
     }
 }
 
-/// SHOP-45: processes one stored billing event. Stripe outages and database errors retry.
 async fn billing_event(
     ctx: Ctx,
     job: Job,

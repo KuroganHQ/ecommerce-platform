@@ -181,7 +181,6 @@ fn fulfillment(
     })
 }
 
-/// Store subscriptions (SHOP-45) when `BILLING_PLANS` and Stripe are set.
 fn billing(env: platform::config::AppEnv) -> anyhow::Result<Option<commerce::billing::Billing>> {
     let stripe = platform::config::PaymentsConfig::from_env(env)?
         .stripe

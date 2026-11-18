@@ -41,7 +41,6 @@ pub enum Error {
     TooManyRequests { code: &'static str },
     #[error("service unavailable: {0}")]
     Unavailable(String),
-    /// A feature the operator has not set up (`billing_not_configured`, ...): 503.
     #[error("not configured: {code}")]
     NotConfigured { code: &'static str },
     #[error(transparent)]

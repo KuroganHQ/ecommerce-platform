@@ -100,7 +100,6 @@ pub struct ApiConfig {
     pub env: AppEnv,
     /// `API_BIND`, defaults to `0.0.0.0:8000`.
     pub bind: SocketAddr,
-    /// `SELF_SIGNUP=1`: anyone can sign up and create a store. Off by default.
     pub self_signup: bool,
 }
 
@@ -681,13 +680,9 @@ impl PaymentsConfig {
     }
 }
 
-/// Store subscriptions on the platform's Stripe account (SHOP-45). Not `Debug`: the secret.
 #[derive(Clone, Default)]
 pub struct BillingConfig {
-    /// `BILLING_PLANS=<plan>:<price id>,...`. Empty: billing is not set up.
     pub plans: Vec<(String, String)>,
-    /// `STRIPE_BILLING_WEBHOOK_SECRET`: the billing endpoint's signing secret, required with
-    /// plans.
     pub webhook_secret: Option<String>,
 }
 

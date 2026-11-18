@@ -218,6 +218,7 @@ async fn billing_is_for_owners(db: PgPool) {
             "status": null,
             "current_period_end": null,
             "cancel_at_period_end": false,
+            "subscription_open": false,
             "plans": ["pro"],
         })
     );
@@ -274,7 +275,6 @@ async fn checkout_and_portal_open_stripe_for_the_store(db: PgPool) {
     .unwrap();
     assert!(customer.starts_with("cus_"));
 
-    // A second checkout reuses the customer.
     Call::post("/admin/v1/billing/checkout", json!({ "plan": "pro" }))
         .tenant(tenant)
         .token(&owner)
@@ -296,7 +296,6 @@ async fn checkout_and_portal_open_stripe_for_the_store(db: PgPool) {
     assert_eq!(status, StatusCode::OK, "{body}");
     assert!(body["url"].as_str().is_some());
 
-    // An open subscription goes through the portal, never a second Checkout.
     sqlx::query("UPDATE platform.subscriptions SET status = 'active' WHERE tenant_id = $1")
         .bind(tenant)
         .execute(&db)

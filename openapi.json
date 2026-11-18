@@ -27487,6 +27487,7 @@
           "configured",
           "plan",
           "cancel_at_period_end",
+          "subscription_open",
           "plans"
         ],
         "properties": {
@@ -27521,6 +27522,10 @@
               "null"
             ],
             "description": "Stripe's subscription status (`active`, `past_due`, `canceled`, ...); `null` before the\nfirst subscription."
+          },
+          "subscription_open": {
+            "type": "boolean",
+            "description": "The subscription still exists: plan changes and cancellation go through the portal, and\ncheckout answers `409 subscription_exists`."
           }
         }
       },

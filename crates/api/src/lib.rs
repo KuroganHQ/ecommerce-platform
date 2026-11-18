@@ -115,10 +115,7 @@ pub struct AppState {
     pub experiments: Option<commerce::experiments::ExperimentKey>,
     pub fetch: platform::http::SafeClient,
     pub same_origin_ready: bool,
-    /// `SELF_SIGNUP=1`: the per-client-IP limit of `POST /signup`. `None`: the signup routes
-    /// answer 404.
     pub self_signup: Option<Arc<rate_limit::StorefrontLimiter>>,
-    /// Store subscriptions (SHOP-45); `None`: billing is not set up (checkout and portal 503).
     pub billing: Option<commerce::billing::Billing>,
 }
 

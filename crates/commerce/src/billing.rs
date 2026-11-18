@@ -14,17 +14,12 @@ use uuid::Uuid;
 
 use crate::payments::stripe::{self, Processed, Stripe};
 
-/// Processes one stored billing event (payload `{"id": <provider_events.id>}`).
 pub const EVENT_JOB: &str = "billing.stripe_event";
-/// `tenants.plan` without a paid subscription (the column default).
 pub const DEFAULT_PLAN: &str = "standard";
 
-/// Statuses that keep the subscribed plan.
 const PAID: &[&str] = &["trialing", "active", "past_due"];
-/// Statuses of a subscription that still exists, so a second Checkout would bill twice.
 const OPEN: &[&str] = &["trialing", "active", "past_due", "unpaid", "paused"];
 
-/// The plan a store gets for its subscription's status.
 pub fn plan_for<'a>(status: &str, subscribed: Option<&'a str>) -> &'a str {
     match subscribed {
         Some(plan) if PAID.contains(&status) => plan,
@@ -32,19 +27,18 @@ pub fn plan_for<'a>(status: &str, subscribed: Option<&'a str>) -> &'a str {
     }
 }
 
-/// The platform's Stripe account with the configured plans. Not `Debug`: Stripe secrets.
 #[derive(Clone)]
 pub struct Billing {
     stripe: Stripe,
-    /// `(plan, price id)`, in configuration order.
     plans: Vec<(String, String)>,
 }
 
 impl Billing {
-    /// `None` without plans or without Stripe: billing is not set up.
     pub fn new(stripe: Option<&Stripe>, cfg: &BillingConfig) -> Option<Self> {
         let secret = cfg.webhook_secret.as_deref()?;
-        (!cfg.plans.is_empty()).then_some(())?;
+        if cfg.plans.is_empty() {
+            return None;
+        }
         Some(Self {
             stripe: stripe?.with_webhook_secret(secret),
             plans: cfg.plans.clone(),
@@ -83,6 +77,9 @@ pub struct BillingOverview {
     pub status: Option<String>,
     pub current_period_end: Option<DateTime<Utc>>,
     pub cancel_at_period_end: bool,
+    /// The subscription still exists: plan changes and cancellation go through the portal, and
+    /// checkout answers `409 subscription_exists`.
+    pub subscription_open: bool,
     /// Plans the store can choose.
     pub plans: Vec<String>,
 }
@@ -105,6 +102,7 @@ pub async fn overview(
     Ok(BillingOverview {
         configured: billing.is_some(),
         plan: row.plan,
+        subscription_open: row.status.as_deref().is_some_and(|s| OPEN.contains(&s)),
         status: row.status,
         current_period_end: row.current_period_end,
         cancel_at_period_end: row.cancel_at_period_end.unwrap_or(false),
@@ -114,8 +112,6 @@ pub async fn overview(
     })
 }
 
-/// A Stripe Checkout URL subscribing the store to `plan`. `409 subscription_exists` while a
-/// subscription is open: plan changes and cancellation go through the portal.
 pub async fn checkout(
     db: &PgPool,
     billing: Option<&Billing>,
@@ -169,7 +165,6 @@ pub async fn checkout(
     Stripe::str_field(&session, "url")
 }
 
-/// A Stripe customer portal URL. `409 no_billing_account` before the first Checkout.
 pub async fn portal(
     db: &PgPool,
     billing: Option<&Billing>,
@@ -205,8 +200,6 @@ pub async fn portal(
     Stripe::str_field(&session, "url")
 }
 
-/// The tenant's Stripe customer, created on first use. The idempotency key makes a retried
-/// creation return the same customer.
 async fn customer(
     db: &PgPool,
     billing: &Billing,
@@ -242,24 +235,17 @@ async fn customer(
         )
         .await?;
     let id = Stripe::str_field(&created, "id")?;
-    sqlx::query!(
+    Ok(sqlx::query_scalar!(
         "INSERT INTO platform.subscriptions (tenant_id, stripe_customer_id) VALUES ($1, $2)
-         ON CONFLICT (tenant_id) DO NOTHING",
+         ON CONFLICT (tenant_id) DO UPDATE SET tenant_id = EXCLUDED.tenant_id
+         RETURNING stripe_customer_id",
         tenant_id,
         id
-    )
-    .execute(db)
-    .await?;
-    Ok(sqlx::query_scalar!(
-        "SELECT stripe_customer_id FROM platform.subscriptions WHERE tenant_id = $1",
-        tenant_id
     )
     .fetch_one(db)
     .await?)
 }
 
-/// Verifies a billing webhook event with the billing endpoint's secret, stores it and enqueues
-/// [`EVENT_JOB`]. `false` for a redelivery.
 pub async fn receive(
     db: &PgPool,
     billing: &Billing,
@@ -269,14 +255,13 @@ pub async fn receive(
     stripe::receive_for(db, &billing.stripe, signature, raw, EVENT_JOB).await
 }
 
-/// Which subscription an event is about, and the customer it names. Ids outside Stripe's
-/// `[A-Za-z0-9_]` never reach a request path.
+fn stripe_id(v: &Value) -> Option<&str> {
+    v.as_str()
+        .filter(|id| !id.is_empty() && id.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'_'))
+}
+
 fn subscription_ref<'a>(kind: &str, object: &'a Value) -> Option<(&'a str, &'a str)> {
-    let field = |name| {
-        object.get(name).and_then(Value::as_str).filter(|id| {
-            !id.is_empty() && id.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'_')
-        })
-    };
+    let field = |name| object.get(name).and_then(stripe_id);
     match kind {
         "checkout.session.completed" => Some((field("subscription")?, field("customer")?)),
         "customer.subscription.created"
@@ -286,8 +271,6 @@ fn subscription_ref<'a>(kind: &str, object: &'a Value) -> Option<(&'a str, &'a s
     }
 }
 
-/// Processes a stored billing event once: re-reads the subscription from Stripe, stores it and
-/// sets `tenants.plan`. Stripe outages and database errors are returned so the job retries.
 pub async fn process_event(db: &PgPool, billing: &Billing, id: Uuid) -> Result<Processed, Error> {
     let ev = sqlx::query!(
         "SELECT type, payload, processed_at, outcome, detail
