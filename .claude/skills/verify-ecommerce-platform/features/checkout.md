@@ -16,7 +16,7 @@ runs on the `demo-fresh(-sk).localhost` origins.
 ## How to get to it (user POV)
 
 - From the cart drawer, `button "K pokladně"`.
-- Same-origin: `http://demo-fresh.localhost:38080/`, add to cart, start checkout; lands on
+- Same-origin: `http://demo-fresh.localhost:63080/`, add to cart, start checkout; lands on
   `/checkout` on the same origin.
 
 ## Driving it with Playwright
@@ -25,12 +25,12 @@ Preconditions:
 
 - Held stack up; the e2e fixture setup ran (`stack.sh up` does it), so the five checkout products
   have stock and the same-origin origins exist.
-- A fresh context with the consent cookie for `demo.localhost:38080` and `demo-sk.localhost:38080`.
+- A fresh context with the consent cookie for `demo.localhost:63080` and `demo-sk.localhost:63080`.
 
 - **Spec run.** Run `stack.sh e2e 3 --project chromium --no-deps checkout/orders.spec.ts -g "guest checkout in CZ"`.
   For the handoff in Firefox: `stack.sh e2e 3 --project firefox --no-deps checkout/handoff.spec.ts`.
 - **Handoff.** Add `tricko-henley` from its product page and click `button "K pokladně"`.
-  `heading "Pokladna" [level=1]` appears on `checkout.demo.localhost:38080`, and
+  `heading "Pokladna" [level=1]` appears on `checkout.demo.localhost:63080`, and
   `getByTestId("checkout-total")` shows the cart total.
 - **Details.** Fill `input[autocomplete="email"]` (a unique `@example.test` address),
   `name`, `street-address`, `postal-code`, `address-level2`. Check `radio /PPL – kurýr/` and
@@ -40,9 +40,9 @@ Preconditions:
   with `heading "Test payment"`.
 - **Pay.** Click `button "Pay"` (exact). The URL becomes `/o/<64 hex>`; `order-status` reads
   `Potvrzená` and `payment-status` reads `Zaplaceno`.
-- **Second view.** `GET http://checkout.demo.localhost:38080/_p/orders/<token>` returns
+- **Second view.** `GET http://checkout.demo.localhost:63080/_p/orders/<token>` returns
   `status: "confirmed"`, `payment.status: "paid"`; Mailpit
-  (`http://127.0.0.1:38025/api/v1/search?query=to:"<email>"`) has `Potvrzení objednávky <number>`.
+  (`http://127.0.0.1:63825/api/v1/search?query=to:"<email>"`) has `Potvrzení objednávky <number>`.
 - **Proof.** Screenshot and ARIA snapshot of the checkout before placing and of the order page;
   save the order JSON and the email text.
 
@@ -56,4 +56,4 @@ Preconditions:
 - The handoff link is single use: reopening it shows `Odkaz na pokladnu vypršel nebo už byl použit.`
 - Unpaid fake orders expire after 60 minutes and release stock.
 - In Firefox, extra tabs on the shop or checkout must go through `/favicon.svg` first (COOP).
-- WebKit drops `Secure` cookies over plain HTTP; WebKit cookie flows need `https://demo-fresh.localhost:38443`.
+- WebKit drops `Secure` cookies over plain HTTP; WebKit cookie flows need `https://demo-fresh.localhost:63443`.

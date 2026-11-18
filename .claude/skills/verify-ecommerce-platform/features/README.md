@@ -10,7 +10,7 @@ the matching feature file as the recipe. `SKILL.md` owns launch, doctor, evidenc
   `owner@lnen.example`, the review fixture and the same-origin origins `demo-fresh(-sk).localhost`.
 - API recipes run on the native API (SKILL.md A, empty database) or on a held stack (seeded).
 - `stack.sh doctor <slot>` names your worktree as owner and shows the commit you mean to prove.
-- Ports below are slot 3 (`38080` HTTP, `38443` HTTPS, Mailpit `38025`); slot 4 uses `4xxxx`.
+- Ports below are slot 3 (`63080` HTTP, `63443` HTTPS, Mailpit `63825`); slot 4 uses `4xxxx`.
 - Never drive the dev stack on `8080` for a proof.
 
 ## Driving conventions

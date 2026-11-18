@@ -40,16 +40,17 @@ After a code change: `wtdev stop`, then start it again. Teardown: `wtdev stop`.
 ### B. Held full stack (own compose project and ports)
 
 `stack.sh` (next to this file) copies `$WT` into `~/.cache/ecommerce-stack/ecommerce-s<slot>`
-without `.git`, writes a `.env` with project `ecommerce-s<slot>` and ports `<slot>xxxx`, then runs
+without `.git`, writes a `.env` with project `ecommerce-s<slot>` and ports `6<slot>xxx`, then runs
 `make up`, `make seed`, the review fixture seed and the e2e fixture setup there. The Makefile allows
 compose in that copy because it is not a linked worktree of the dev stack; this is what
-`pnpm verify` does too. Slots are 3 and 4 (1 is `pnpm verify`, 2 collides with worktree API
-ports 28000-28199); `up` refuses a slot another worktree holds or a port in use.
+`pnpm verify` does too. Slots are 3 and 4. `up` without a slot takes yours, else a free one, else
+one whose owner checkout no longer exists (it tears that stack down first), and prints the number.
+It refuses a slot another live worktree holds and a port a listener holds.
 
 ```bash
 cd "$WT"
 S=$WT/.claude/skills/verify-ecommerce-platform/stack.sh
-$S up 3          # prints "stack: up, shop http://demo.localhost:38080 https://demo.localhost:38443"
+$S up            # prints "stack: slot 3" ... "stack: up in slot 3, shop http://demo.localhost:63080 ..."
 $S doctor 3
 $S sync 3 api worker     # after Rust edits; also: edge | admin | auth | mocks
 $S sync 3                # after theme or checkout edits: rebuild and publish artifacts
@@ -57,10 +58,16 @@ eval "$($S env 3)"       # COMPOSE_PROJECT_NAME, HTTP(S)_PORT, PG_PORT, MAILPIT_
 $S down 3
 ```
 
-Slot 3 URLs: shop `http://demo.localhost:38080` (CZ), `http://demo-sk.localhost:38080` (SK),
-`https://demo.localhost:38443` (TLS + h2), checkout `http://checkout.demo.localhost:38080`, API
-`http://api.localhost:38080`, admin `http://admin.localhost:38080`, Mailpit
-`http://127.0.0.1:38025`. Slot 4 swaps the leading 3 for 4. The compose log is
+A setting you add to `~/.cache/ecommerce-stack/ecommerce-s<slot>/.env` (say
+`SAME_ORIGIN_CHECKOUT_READY=1`) survives `sync` and a re-`up`: they rebuild the file from the
+branch's `.env.example` and put your lines back, printing the keys they kept. Recreate the
+services that read it (`$S sync 3 api`).
+
+Slot 3 URLs: shop `http://demo.localhost:63080` (CZ), `http://demo-sk.localhost:63080` (SK),
+`https://demo.localhost:63443` (TLS + h2), checkout `http://checkout.demo.localhost:63080`, API
+`http://api.localhost:63080`, admin `http://admin.localhost:63080`, Mailpit
+`http://127.0.0.1:63825`. Slot 4 swaps `63` for `64`. Ports stay above the Linux ephemeral range
+(32768-60999), so a local outgoing connection never holds one. The compose log is
 `~/.cache/ecommerce-stack/ecommerce-s<slot>.log`; services: `docker logs ecommerce-s3-api-1`.
 
 ### C. `pnpm verify <PR#> [--full]`
@@ -170,8 +177,6 @@ compose-provided provider stand-ins (stripe-mock, the fake gateway, carrier, ban
 
 Exercised when the skill was added (2026-10-19, main `ec7c23d`): A end to end (launch, doctor,
 `api.md` health/OpenAPI/auth gate, cleanup), plus read-only probes of the dev stack for the
-browser recipe (Chromium home page, Firefox second tab via `/favicon.svg` over HTTPS with
-`ignoreHTTPSErrors`) and the edge headers in `edge.md`. Not yet run: `stack.sh up/sync/e2e/down`
-(B), generalized from the SHOP-121/122 lane scripts that did run, and the storefront and
-checkout journeys on a held stack. The first lane that runs B fixes what fails here and deletes
-this paragraph.
+browser recipe and the edge headers in `edge.md`. B ran end to end on 2026-11-19 (SHOP-146/150/151):
+`up` without a slot reclaiming a slot whose owner was gone, the port-taken refusal, `doctor`,
+`sync 3 api` keeping a slot-only `.env` setting, `e2e` (full `chromium` project) and `down`.

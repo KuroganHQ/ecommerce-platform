@@ -13,7 +13,7 @@ The Rust API serves health, readiness, the OpenAPI document and the Admin API, w
 ## How to get to it (user POV)
 
 - Native API: `http://127.0.0.1:$API_PORT` (SKILL.md A).
-- Held stack: `http://api.localhost:38080`; staff sign-in at `http://admin.localhost:38080/login`.
+- Held stack: `http://api.localhost:63080`; staff sign-in at `http://admin.localhost:63080/login`.
 
 ## Driving it with curl and the smoke scripts
 
