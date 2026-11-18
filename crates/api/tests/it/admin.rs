@@ -438,6 +438,7 @@ async fn internal_resolve_needs_the_service_token(db: PgPool) {
             name: "Demo",
             owner_user_id: "u",
             owner_email: "u@example.test",
+            signup_user_id: None,
         },
     )
     .await

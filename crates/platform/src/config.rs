@@ -65,6 +65,17 @@ fn url(lookup: Lookup, name: &'static str) -> Result<Url, ConfigError> {
     }
 }
 
+fn flag(lookup: Lookup, name: &'static str) -> Result<bool, ConfigError> {
+    match get(lookup, name).as_deref().map(str::trim) {
+        None | Some("0" | "false") => Ok(false),
+        Some("1" | "true") => Ok(true),
+        Some(other) => Err(ConfigError::Invalid {
+            name,
+            reason: format!("expected 1 or 0, got {other:?}"),
+        }),
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AppEnv {
     Dev,
@@ -89,6 +100,8 @@ pub struct ApiConfig {
     pub env: AppEnv,
     /// `API_BIND`, defaults to `0.0.0.0:8000`.
     pub bind: SocketAddr,
+    /// `SELF_SIGNUP=1`: anyone can sign up and create a store. Off by default.
+    pub self_signup: bool,
 }
 
 impl ApiConfig {
@@ -100,6 +113,7 @@ impl ApiConfig {
         Ok(Self {
             env: parsed(lookup, "APP_ENV", AppEnv::Prod)?,
             bind: parsed(lookup, "API_BIND", SocketAddr::from(([0, 0, 0, 0], 8000)))?,
+            self_signup: flag(lookup, "SELF_SIGNUP")?,
         })
     }
 }
@@ -667,6 +681,66 @@ impl PaymentsConfig {
     }
 }
 
+/// Store subscriptions on the platform's Stripe account (SHOP-45). Not `Debug`: the secret.
+#[derive(Clone, Default)]
+pub struct BillingConfig {
+    /// `BILLING_PLANS=<plan>:<price id>,...`. Empty: billing is not set up.
+    pub plans: Vec<(String, String)>,
+    /// `STRIPE_BILLING_WEBHOOK_SECRET`: the billing endpoint's signing secret, required with
+    /// plans.
+    pub webhook_secret: Option<String>,
+}
+
+impl BillingConfig {
+    pub fn from_env() -> Result<Self, ConfigError> {
+        Self::from_lookup(&process_env)
+    }
+
+    pub fn from_lookup(lookup: Lookup) -> Result<Self, ConfigError> {
+        let invalid = |reason: String| ConfigError::Invalid {
+            name: "BILLING_PLANS",
+            reason,
+        };
+        let mut plans: Vec<(String, String)> = Vec::new();
+        for entry in get(lookup, "BILLING_PLANS")
+            .iter()
+            .flat_map(|v| v.split(','))
+        {
+            let (plan, price) = entry
+                .trim()
+                .split_once(':')
+                .ok_or_else(|| invalid(format!("expected <plan>:<price id>, got {entry:?}")))?;
+            let plan_ok = (1..=40).contains(&plan.len())
+                && plan.bytes().all(|c| {
+                    c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'_' || c == b'-'
+                });
+            if !plan_ok || !price.starts_with("price_") || price.len() > 255 {
+                return Err(invalid(format!(
+                    "expected a lowercase plan name and a price_… id, got {entry:?}"
+                )));
+            }
+            if plans.iter().any(|(p, _)| p == plan) {
+                return Err(invalid(format!("plan {plan:?} listed twice")));
+            }
+            plans.push((plan.to_owned(), price.to_owned()));
+        }
+        let webhook_secret = get(lookup, "STRIPE_BILLING_WEBHOOK_SECRET");
+        if webhook_secret.as_ref().is_some_and(|s| s.len() < 16) {
+            return Err(ConfigError::Invalid {
+                name: "STRIPE_BILLING_WEBHOOK_SECRET",
+                reason: "must be at least 16 characters".into(),
+            });
+        }
+        if !plans.is_empty() && webhook_secret.is_none() {
+            return Err(ConfigError::Missing("STRIPE_BILLING_WEBHOOK_SECRET"));
+        }
+        Ok(Self {
+            plans,
+            webhook_secret,
+        })
+    }
+}
+
 /// Operations and integrations shared by api and worker (WP14). Not `Debug`: holds the
 /// secrets key.
 #[derive(Clone)]
@@ -791,6 +865,54 @@ mod tests {
         assert!(payments(&[("STRIPE_SECRET_KEY", "pk_test_abc")], AppEnv::Dev).is_err());
     }
     use std::collections::HashMap;
+
+    #[test]
+    fn self_signup_is_off_unless_enabled() {
+        assert!(!ApiConfig::from_lookup(&env(&[])).unwrap().self_signup);
+        assert!(
+            ApiConfig::from_lookup(&env(&[("SELF_SIGNUP", "1")]))
+                .unwrap()
+                .self_signup
+        );
+        assert!(ApiConfig::from_lookup(&env(&[("SELF_SIGNUP", "yes")])).is_err());
+    }
+
+    #[test]
+    fn billing_plans_parse_or_refuse_to_start() {
+        let none = BillingConfig::from_lookup(&env(&[])).unwrap();
+        assert!(none.plans.is_empty());
+        let secret = ("STRIPE_BILLING_WEBHOOK_SECRET", "whsec_billing_0123456789");
+        let c = BillingConfig::from_lookup(&env(&[
+            ("BILLING_PLANS", " pro:price_123 , growth:price_456"),
+            secret,
+        ]))
+        .unwrap();
+        assert_eq!(
+            c.plans,
+            vec![
+                ("pro".to_owned(), "price_123".to_owned()),
+                ("growth".to_owned(), "price_456".to_owned())
+            ]
+        );
+        assert_eq!(c.webhook_secret.as_deref(), Some(secret.1));
+        for bad in [
+            "pro",
+            "pro:",
+            ":price_1",
+            "Pro:price_1",
+            "pro:price_1,pro:price_2",
+            "pro:prod_1",
+        ] {
+            assert!(
+                BillingConfig::from_lookup(&env(&[("BILLING_PLANS", bad), secret])).is_err(),
+                "{bad}"
+            );
+        }
+        assert_eq!(
+            BillingConfig::from_lookup(&env(&[("BILLING_PLANS", "pro:price_1")])).err(),
+            Some(ConfigError::Missing("STRIPE_BILLING_WEBHOOK_SECRET"))
+        );
+    }
 
     #[test]
     fn ops_config_validates_the_secrets_key() {

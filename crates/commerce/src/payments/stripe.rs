@@ -87,7 +87,15 @@ impl Stripe {
         self.publishable_key.as_deref()
     }
 
-    async fn call(
+    /// The same account and key, verifying another webhook endpoint's events.
+    pub fn with_webhook_secret(&self, secret: &str) -> Self {
+        Self {
+            webhook_secret: secret.as_bytes().to_vec(),
+            ..self.clone()
+        }
+    }
+
+    pub(crate) async fn call(
         &self,
         method: reqwest::Method,
         path: &str,
@@ -142,7 +150,7 @@ impl Stripe {
         Ok(body)
     }
 
-    fn str_field(v: &Value, field: &str) -> Result<String, Error> {
+    pub(crate) fn str_field(v: &Value, field: &str) -> Result<String, Error> {
         v.get(field)
             .and_then(Value::as_str)
             .map(str::to_owned)
@@ -597,6 +605,17 @@ pub async fn receive(
     signature: &str,
     raw: &[u8],
 ) -> Result<bool, Error> {
+    receive_for(db, stripe, signature, raw, EVENT_JOB).await
+}
+
+/// [`receive`], processed by the `job` kind (billing events have their own).
+pub(crate) async fn receive_for(
+    db: &sqlx::PgPool,
+    stripe: &Stripe,
+    signature: &str,
+    raw: &[u8],
+    job: &'static str,
+) -> Result<bool, Error> {
     stripe.verify(signature, raw, Utc::now())?;
     let payload: Value = serde_json::from_slice(raw).map_err(|_| Error::Validation {
         code: "invalid_event",
@@ -630,7 +649,7 @@ pub async fn receive(
         tx.commit().await?;
         return Ok(false);
     };
-    let mut job = platform::queue::NewJob::new(EVENT_JOB, json!({ "id": id }));
+    let mut job = platform::queue::NewJob::new(job, json!({ "id": id }));
     job.idempotency_key = Some(format!("provider_event:{id}"));
     platform::queue::enqueue(&mut *tx, &job).await?;
     tx.commit().await?;
@@ -723,7 +742,7 @@ pub async fn process_event(db: &sqlx::PgPool, id: Uuid) -> Result<Processed, Err
     Ok(outcome)
 }
 
-async fn finish(
+pub(crate) async fn finish(
     conn: &mut sqlx::PgConnection,
     id: Uuid,
     tenant_id: Option<Uuid>,

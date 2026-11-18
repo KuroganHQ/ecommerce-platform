@@ -9,6 +9,7 @@ pub mod adtracking;
 pub mod ai;
 pub mod analytics;
 pub mod audit;
+pub mod billing;
 pub mod capability;
 pub mod carriers;
 pub mod cart;
