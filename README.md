@@ -165,6 +165,8 @@ pnpm worktree:tidy       # this worktree: drop target/ once HEAD is a merged PR'
 - Setup symlinks `.env` to the main checkout's, installs packages, creates `app_wt_<name>_<hash>`
   on the shared Postgres, migrates it with the branch's migrations and records it and the API port
   (wtdev's, if installed) in `.env.worktree.local`. `make migrate` and `make api-native` use them.
+- The Makefile reads `.env.example` before `.env`, so a key a branch adds to `.env.example` has its
+  default even when the main checkout's `.env` predates it; values in `.env` still win.
 - Until setup has run, `make` in a worktree stops and asks for it. Compose targets (`make up`,
   `down`, `dev-infra`, `seed`, `logs`, ...) and `backup`/`restore` always refuse: the worktree
   shares the main checkout's `COMPOSE_PROJECT_NAME`, so they would act on its stack. A worktree

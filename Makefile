@@ -5,6 +5,7 @@ SHELL := bash
 
 LINKED_WORKTREE := $(filter-out $(shell git rev-parse --path-format=absolute --git-common-dir 2>/dev/null),$(shell git rev-parse --path-format=absolute --git-dir 2>/dev/null))
 
+include .env.example
 -include .env
 # The compose project decides which stack a checkout drives: a worktree with its own project name
 # (scripts/verify.sh) runs its own stack, any other linked worktree shares the main one.
@@ -22,16 +23,8 @@ endif
 
 export CARGO_BUILD_JOBS ?= 6
 
-PG_PORT ?= 55432
-MEILI_PORT ?= 57700
-MEILI_SEARCH_KEY ?= 2245a27fd200f741b246ce0479586838d71d3f5925e973144596c1ed10e3d918
-MEILI_ADMIN_KEY ?= 39acad57a641ce3bb328074fcae83ae01e5cc0edbb28c2ae113d3c6b246901f6
-HTTPS_PORT ?= 8443
-STRIPE_MOCK_PORT ?= 12111
-APP_OWNER_PASSWORD ?= app-owner-local
 APP_DB ?= app
 API_PORT ?= 8000
-ACCOUNT_DOMAIN ?= accounts.localhost
 OWNER_DATABASE_URL ?= postgres://app_owner:$(APP_OWNER_PASSWORD)@localhost:$(PG_PORT)/$(APP_DB)
 TEST_DATABASE_URL ?= postgres://app_owner:$(APP_OWNER_PASSWORD)@localhost:$(PG_PORT)/app_test
 

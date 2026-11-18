@@ -13,7 +13,7 @@ home, categories with filters and sort, search, product pages with variants, and
 
 ## How to get to it (user POV)
 
-- Open `http://demo.localhost:38080/` (CZ) or `http://demo-sk.localhost:38080/` (SK).
+- Open `http://demo.localhost:63080/` (CZ) or `http://demo-sk.localhost:63080/` (SK).
 - Choose a category in `navigation "Hlavní navigace"`, e.g. `/c/obleceni`.
 - Type into `combobox "Hledat"`, or open `/search?q=mikina`.
 - Open a product, e.g. `/p/mikina-fleece`.
@@ -35,7 +35,7 @@ Preconditions:
 - **Add to cart.** Click `button "Přidat do košíku"` in `main`. `dialog /Košík/` opens with
   `link "Mikina Fleece"`; `button "Košík, položek: 1"` exists in the header.
 - **Quantity.** Click `button "Přidat"` in the drawer. The drawer shows `2 položky`.
-- **Handoff.** Click `button "K pokladně"`. The URL becomes `http://checkout.demo.localhost:38080/...`
+- **Handoff.** Click `button "K pokladně"`. The URL becomes `http://checkout.demo.localhost:63080/...`
   (continue in [checkout](./checkout.md)).
 - **Search empty state.** Go to `/search?q=xyzzyqq`. `Nic jsme nenašli.` is visible.
 

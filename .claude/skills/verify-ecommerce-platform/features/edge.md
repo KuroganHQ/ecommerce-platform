@@ -14,7 +14,7 @@ and keeps the Storefront and Internal APIs off the public API host.
 
 ## How to get to it (user POV)
 
-- Any shop URL on the held stack, e.g. `http://demo.localhost:38080/`.
+- Any shop URL on the held stack, e.g. `http://demo.localhost:63080/`.
 - The page-model endpoints the theme calls, e.g. `/_p/public/pages/product/tricko-basic`.
 
 ## Driving it with curl
@@ -23,16 +23,16 @@ Preconditions:
 
 - Held stack up; `stack.sh doctor 3` is green.
 
-- **Cache.** Run `curl -sS -o /dev/null -D - http://demo.localhost:38080/` twice. Headers show
+- **Cache.** Run `curl -sS -o /dev/null -D - http://demo.localhost:63080/` twice. Headers show
   `Cache-Control: public, max-age=0, must-revalidate` and `X-Edge-Cache` (`HIT` on the repeat).
-- **Security headers.** The same response and `http://checkout.demo.localhost:38080/` carry
+- **Security headers.** The same response and `http://checkout.demo.localhost:63080/` carry
   `Cross-Origin-Opener-Policy: same-origin`; checkout is `Cache-Control: no-store`.
 - **Compression.** With `--compressed`, `Content-Encoding: gzip` (Caddy `encode gzip`).
-- **Page model.** `curl -sS http://demo.localhost:38080/_p/public/pages/product/tricko-basic | jq '.product.name'`
+- **Page model.** `curl -sS http://demo.localhost:63080/_p/public/pages/product/tricko-basic | jq '.product.name'`
   prints `"Tričko Basic"`; the response is `no-store` JSON.
-- **Isolation.** `http://api.localhost:38080/storefront/x` and `/internal/x` return `404` with
+- **Isolation.** `http://api.localhost:63080/storefront/x` and `/internal/x` return `404` with
   body `not found`.
-- **TLS.** `curl -sSk -D - -o /dev/null https://demo.localhost:38443/` answers `HTTP/2 200`
+- **TLS.** `curl -sSk -D - -o /dev/null https://demo.localhost:63443/` answers `HTTP/2 200`
   without an `alt-svc: h3` header.
 
 ## Gotchas
