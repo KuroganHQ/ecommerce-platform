@@ -13,14 +13,16 @@ use uuid::Uuid;
 
 const SECRET: &str = "whsec_billing_test_0123456789";
 
-/// Stripe's subscription retrieval and Checkout Sessions, as the test sets them.
 #[derive(Default)]
 struct FakeStripe {
     subscription: RwLock<Value>,
-    /// Status of `cs_<index>`.
     sessions: RwLock<Vec<&'static str>>,
-    /// Holds the next subscription read: sends its snapshot, then waits for the release.
-    held_read: Mutex<Option<(oneshot::Sender<Value>, oneshot::Receiver<()>)>>,
+    held_read: Mutex<Option<HeldRead>>,
+}
+
+struct HeldRead {
+    snapshot: oneshot::Sender<Value>,
+    release: oneshot::Receiver<()>,
 }
 
 fn session_index(id: &str) -> usize {
@@ -38,9 +40,9 @@ async fn fake_stripe(fake: Arc<FakeStripe>) -> String {
                     let mut body = fake.subscription.read().await.clone();
                     body["id"] = json!(id);
                     let held = fake.held_read.lock().await.take();
-                    if let Some((snapshot, release)) = held {
-                        snapshot.send(body.clone()).unwrap();
-                        release.await.unwrap();
+                    if let Some(held) = held {
+                        held.snapshot.send(body.clone()).unwrap();
+                        held.release.await.unwrap();
                     }
                     axum::Json(body)
                 }
@@ -66,7 +68,8 @@ async fn fake_stripe(fake: Arc<FakeStripe>) -> String {
                 let fake = f3.clone();
                 async move {
                     let status = fake.sessions.read().await[session_index(&id)];
-                    axum::Json(json!({ "id": id, "status": status }))
+                    let subscription = (status == "complete").then_some("sub_1");
+                    axum::Json(json!({ "id": id, "status": status, "subscription": subscription }))
                 }
             }),
         )
@@ -153,14 +156,13 @@ impl Fixture {
     }
 
     async fn deliver(&self, event_id: &str, kind: &str, object: Value) -> Processed {
-        let id = self.store(event_id, kind, object).await;
+        let id = self.receive_unprocessed(event_id, kind, object).await;
         billing::process_event(&self.db, &self.billing, id)
             .await
             .unwrap()
     }
 
-    /// Receives an event through the webhook path without processing it.
-    async fn store(&self, event_id: &str, kind: &str, object: Value) -> Uuid {
+    async fn receive_unprocessed(&self, event_id: &str, kind: &str, object: Value) -> Uuid {
         let raw = json!({ "id": event_id, "type": kind, "livemode": false, "data": { "object": object } })
             .to_string();
         let sig = self.signer.sign(raw.as_bytes(), Utc::now()).unwrap();
@@ -185,6 +187,18 @@ impl Fixture {
         .unwrap();
         assert_eq!(job, 1, "the billing job is enqueued");
         id
+    }
+
+    async fn checkout(&self) -> Result<String, platform::Error> {
+        billing::checkout(
+            &self.db,
+            Some(&self.billing),
+            self.tenant,
+            "owner@example.test",
+            "pro",
+            "https://admin.example.test",
+        )
+        .await
     }
 
     async fn plan(&self) -> (String, Option<String>) {
@@ -274,16 +288,19 @@ async fn overlapping_events_keep_the_newest_stripe_state(db: PgPool) {
     let f = Arc::new(fixture(&db).await);
     let object = json!({ "id": "sub_1", "customer": "cus_ours" });
     let older = f
-        .store("evt_older", "customer.subscription.updated", object.clone())
+        .receive_unprocessed("evt_older", "customer.subscription.updated", object.clone())
         .await;
     let newer = f
-        .store("evt_newer", "customer.subscription.updated", object)
+        .receive_unprocessed("evt_newer", "customer.subscription.updated", object)
         .await;
 
     f.set_subscription("active", "cus_ours").await;
     let (snapshot_tx, snapshot) = oneshot::channel();
     let (release, release_rx) = oneshot::channel();
-    *f.stripe.held_read.lock().await = Some((snapshot_tx, release_rx));
+    *f.stripe.held_read.lock().await = Some(HeldRead {
+        snapshot: snapshot_tx,
+        release: release_rx,
+    });
     let first = {
         let f = f.clone();
         tokio::spawn(async move { billing::process_event(&f.db, &f.billing, older).await })
@@ -294,7 +311,6 @@ async fn overlapping_events_keep_the_newest_stripe_state(db: PgPool) {
         "the older job read Stripe"
     );
 
-    // Stripe moves on; a second job for the same store starts while the first one is in flight.
     f.set_subscription("canceled", "cus_ours").await;
     let mut second = {
         let f = f.clone();
@@ -309,4 +325,42 @@ async fn overlapping_events_keep_the_newest_stripe_state(db: PgPool) {
     };
 
     assert_eq!(f.plan().await, ("standard".into(), Some("canceled".into())));
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn choosing_a_plan_again_expires_the_open_checkout(db: PgPool) {
+    let f = fixture(&db).await;
+    let first = f.checkout().await.unwrap();
+    let second = f.checkout().await.unwrap();
+    assert_eq!(first, "https://checkout.stripe.test/cs_0");
+    assert_eq!(second, "https://checkout.stripe.test/cs_1");
+    assert_eq!(
+        *f.stripe.sessions.read().await,
+        ["expired", "open"],
+        "only the newest Checkout can still be paid"
+    );
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_paid_checkout_refuses_another_before_its_webhook(db: PgPool) {
+    let f = fixture(&db).await;
+    f.checkout().await.unwrap();
+    f.stripe.sessions.write().await[0] = "complete";
+    let err = f.checkout().await.unwrap_err();
+    assert_eq!(err.code(), "subscription_exists");
+    assert_eq!(
+        *f.stripe.sessions.read().await,
+        ["complete"],
+        "no second Checkout"
+    );
+
+    f.set_subscription("canceled", "cus_ours").await;
+    f.deliver(
+        "evt_ended",
+        "customer.subscription.deleted",
+        json!({ "id": "sub_1", "customer": "cus_ours" }),
+    )
+    .await;
+    assert!(f.checkout().await.is_ok());
+    assert_eq!(*f.stripe.sessions.read().await, ["complete", "open"]);
 }

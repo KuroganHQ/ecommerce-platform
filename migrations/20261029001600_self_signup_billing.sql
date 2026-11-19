@@ -11,5 +11,6 @@ CREATE TABLE platform.subscriptions (
                                'active', 'past_due', 'canceled', 'unpaid', 'paused')),
     current_period_end     timestamptz,
     cancel_at_period_end   boolean NOT NULL DEFAULT false,
+    checkout_session_id    text,
     updated_at             timestamptz NOT NULL DEFAULT now()
 );

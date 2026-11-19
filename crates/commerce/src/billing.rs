@@ -125,19 +125,6 @@ pub async fn checkout(
         code: "unknown_plan",
         detail: format!("no plan {plan:?}"),
     })?;
-    let status = sqlx::query_scalar!(
-        "SELECT status FROM platform.subscriptions WHERE tenant_id = $1",
-        tenant_id
-    )
-    .fetch_optional(db)
-    .await?
-    .flatten();
-    if status.as_deref().is_some_and(|s| OPEN.contains(&s)) {
-        return Err(Error::Conflict {
-            code: "subscription_exists",
-            detail: "the store already has a subscription; manage it in the billing portal".into(),
-        });
-    }
     let customer = customer(db, billing, tenant_id, owner_email).await?;
     let form = [
         ("mode", "subscription"),
@@ -152,6 +139,45 @@ pub async fn checkout(
         ("cancel_url", &format!("{admin_origin}/billing")),
     ]
     .map(|(k, v)| (k.to_owned(), v.to_owned()));
+    let mut tx = db.begin().await?;
+    let row = sqlx::query!(
+        "SELECT status, stripe_subscription_id, checkout_session_id
+         FROM platform.subscriptions WHERE tenant_id = $1 FOR UPDATE",
+        tenant_id
+    )
+    .fetch_one(&mut *tx)
+    .await?;
+    if row.status.as_deref().is_some_and(|s| OPEN.contains(&s)) {
+        return Err(subscription_exists());
+    }
+    if let Some(previous) = &row.checkout_session_id {
+        let path = format!("/v1/checkout/sessions/{previous}");
+        let session = billing
+            .stripe
+            .call(reqwest::Method::GET, &path, None, None, &[])
+            .await?;
+        match session.get("status").and_then(Value::as_str) {
+            Some("open") => {
+                billing
+                    .stripe
+                    .call(
+                        reqwest::Method::POST,
+                        &format!("{path}/expire"),
+                        None,
+                        None,
+                        &[],
+                    )
+                    .await?;
+            }
+            Some("complete")
+                if session.get("subscription").and_then(Value::as_str)
+                    != row.stripe_subscription_id.as_deref() =>
+            {
+                return Err(subscription_exists());
+            }
+            _ => {}
+        }
+    }
     let session = billing
         .stripe
         .call(
@@ -162,7 +188,24 @@ pub async fn checkout(
             &form,
         )
         .await?;
-    Stripe::str_field(&session, "url")
+    let session_id = Stripe::str_field(&session, "id")?;
+    let url = Stripe::str_field(&session, "url")?;
+    sqlx::query!(
+        "UPDATE platform.subscriptions SET checkout_session_id = $2 WHERE tenant_id = $1",
+        tenant_id,
+        session_id
+    )
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    Ok(url)
+}
+
+fn subscription_exists() -> Error {
+    Error::Conflict {
+        code: "subscription_exists",
+        detail: "the store already has a subscription; manage it in the billing portal".into(),
+    }
 }
 
 pub async fn portal(
@@ -296,8 +339,6 @@ pub async fn process_event(db: &PgPool, billing: &Billing, id: Uuid) -> Result<P
             Processed::Ignored(format!("unhandled type {}", ev.r#type)),
         ),
         Some((subscription_id, customer)) => {
-            // The store's row stays locked through the Stripe read, so overlapping events
-            // commit in the order they read Stripe.
             let current = sqlx::query!(
                 "SELECT tenant_id, stripe_subscription_id, status FROM platform.subscriptions
                  WHERE stripe_customer_id = $1 FOR UPDATE",
