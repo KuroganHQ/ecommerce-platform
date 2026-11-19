@@ -169,11 +169,29 @@ pub async fn checkout(
                     )
                     .await?;
             }
-            Some("complete")
-                if session.get("subscription").and_then(Value::as_str)
-                    != row.stripe_subscription_id.as_deref() =>
-            {
-                return Err(subscription_exists());
+            Some("complete") => {
+                let paid = session.get("subscription").and_then(Value::as_str);
+                if let Some(paid) =
+                    paid.filter(|p| Some(*p) != row.stripe_subscription_id.as_deref())
+                {
+                    let sub = billing
+                        .stripe
+                        .call(
+                            reqwest::Method::GET,
+                            &format!("/v1/subscriptions/{paid}"),
+                            None,
+                            None,
+                            &[],
+                        )
+                        .await?;
+                    if sub
+                        .get("status")
+                        .and_then(Value::as_str)
+                        .is_some_and(|s| OPEN.contains(&s))
+                    {
+                        return Err(subscription_exists());
+                    }
+                }
             }
             _ => {}
         }

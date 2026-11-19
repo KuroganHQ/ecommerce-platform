@@ -67,8 +67,9 @@ async fn fake_stripe(fake: Arc<FakeStripe>) -> String {
             get(move |Path(id): Path<String>| {
                 let fake = f3.clone();
                 async move {
-                    let status = fake.sessions.read().await[session_index(&id)];
-                    let subscription = (status == "complete").then_some("sub_1");
+                    let index = session_index(&id);
+                    let status = fake.sessions.read().await[index];
+                    let subscription = (status == "complete").then(|| format!("sub_{}", index + 1));
                     axum::Json(json!({ "id": id, "status": status, "subscription": subscription }))
                 }
             }),
@@ -346,6 +347,7 @@ async fn a_paid_checkout_refuses_another_before_its_webhook(db: PgPool) {
     let f = fixture(&db).await;
     f.checkout().await.unwrap();
     f.stripe.sessions.write().await[0] = "complete";
+    f.set_subscription("active", "cus_ours").await;
     let err = f.checkout().await.unwrap_err();
     assert_eq!(err.code(), "subscription_exists");
     assert_eq!(
@@ -363,4 +365,30 @@ async fn a_paid_checkout_refuses_another_before_its_webhook(db: PgPool) {
     .await;
     assert!(f.checkout().await.is_ok());
     assert_eq!(*f.stripe.sessions.read().await, ["complete", "open"]);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_late_event_of_an_ended_subscription_keeps_the_store_billable(db: PgPool) {
+    let f = fixture(&db).await;
+    f.set_subscription("canceled", "cus_ours").await;
+    for (session, subscription) in [(0, "sub_1"), (1, "sub_2")] {
+        f.checkout().await.unwrap();
+        f.stripe.sessions.write().await[session] = "complete";
+        f.deliver(
+            &format!("evt_{subscription}_ended"),
+            "customer.subscription.deleted",
+            json!({ "id": subscription, "customer": "cus_ours" }),
+        )
+        .await;
+    }
+    f.deliver(
+        "evt_sub_1_late",
+        "customer.subscription.updated",
+        json!({ "id": "sub_1", "customer": "cus_ours" }),
+    )
+    .await;
+    assert!(
+        f.checkout().await.is_ok(),
+        "both subscriptions ended, so the store can subscribe again"
+    );
 }
