@@ -31,6 +31,7 @@ pub const BUILDER_TOKEN: &str = "theme-builder-test-token-0123456789abcdef";
 pub const EXPERIMENTS_SECRET: &str = "experiments-secret-for-tests-0123456789";
 pub const FAKE_SECRET: &str = "fake-gateway-test-secret";
 pub const STRIPE_WEBHOOK_SECRET: &str = "whsec_api_test_0123456789";
+pub const BILLING_WEBHOOK_SECRET: &str = "whsec_billing_api_test_0123456789";
 
 pub fn jwk(kid: &str, x: &str) -> Value {
     json!({ "kty": "OKP", "crv": "Ed25519", "alg": "EdDSA", "kid": kid, "x": x })
@@ -115,7 +116,28 @@ pub async fn jwks_server(keys: Value) -> Jwks {
 pub const MAIL_EVENTS_SECRET: &str = "test-mail-events-secret-0123456789abcdef";
 
 pub fn state(db: PgPool, jwks: &Jwks, forced_interval: Duration) -> AppState {
+    let stripe = commerce::payments::stripe::Stripe::new(
+        &platform::config::StripeConfig {
+            mode: platform::config::StripeMode::Simulator,
+            api_url: std::env::var("STRIPE_MOCK_URL")
+                .unwrap_or_else(|_| "http://localhost:12111".into())
+                .parse()
+                .unwrap(),
+            secret_key: "sk_test_x".into(),
+            publishable_key: None,
+            webhook_secret: STRIPE_WEBHOOK_SECRET.into(),
+        },
+        reqwest::Client::new(),
+    );
     AppState {
+        self_signup: Some(Arc::new(api::rate_limit::StorefrontLimiter::per_hour(1000))),
+        billing: commerce::billing::Billing::new(
+            Some(&stripe),
+            &platform::config::BillingConfig {
+                plans: vec![("pro".into(), "price_1PgafmB7WZ01zgkW6dKueIc5".into())],
+                webhook_secret: Some(BILLING_WEBHOOK_SECRET.into()),
+            },
+        ),
         db,
         auth_service: Some(
             api::auth_service::AuthService::new(jwks.url.parse().unwrap(), SERVICE_TOKEN.into())
@@ -149,19 +171,7 @@ pub fn state(db: PgPool, jwks: &Jwks, forced_interval: Duration) -> AppState {
                 fake: Some(commerce::payments::FakeGateway::new(
                     FAKE_SECRET.as_bytes().to_vec(),
                 )),
-                stripe: Some(commerce::payments::stripe::Stripe::new(
-                    &platform::config::StripeConfig {
-                        mode: platform::config::StripeMode::Simulator,
-                        api_url: std::env::var("STRIPE_MOCK_URL")
-                            .unwrap_or_else(|_| "http://localhost:12111".into())
-                            .parse()
-                            .unwrap(),
-                        secret_key: "sk_test_x".into(),
-                        publishable_key: None,
-                        webhook_secret: STRIPE_WEBHOOK_SECRET.into(),
-                    },
-                    reqwest::Client::new(),
-                )),
+                stripe: Some(stripe),
                 secrets: None,
             },
             packeta: None,

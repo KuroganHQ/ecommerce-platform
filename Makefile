@@ -68,6 +68,7 @@ api-native: ## Run the API on the host, port API_PORT, database APP_DB (needs `m
 	THEME_SECRET="$(THEME_SECRET)" THEME_BUILDER_TOKEN="$(THEME_BUILDER_TOKEN)" MAIL_EVENTS_SECRET="$(MAIL_EVENTS_SECRET)" \
 	EXPERIMENTS_SECRET="$(EXPERIMENTS_SECRET)" ACCOUNT_DOMAIN="$(ACCOUNT_DOMAIN)" \
 	STRIPE_MOCK_URL=http://localhost:$(STRIPE_MOCK_PORT) STRIPE_WEBHOOK_SECRET=whsec_local_simulator_0123456789 \
+	SELF_SIGNUP="$(SELF_SIGNUP)" BILLING_PLANS="$(BILLING_PLANS)" STRIPE_BILLING_WEBHOOK_SECRET="$(STRIPE_BILLING_WEBHOOK_SECRET)" \
 	cargo run --locked -p api
 
 sqlx-prepare: ## Refresh .sqlx/ (offline query data) after SQL changes; needs `make migrate` first

@@ -102,6 +102,7 @@ pub struct NewTenant<'a> {
     pub name: &'a str,
     pub owner_user_id: &'a str,
     pub owner_email: &'a str,
+    pub signup_user_id: Option<&'a str>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -112,7 +113,7 @@ pub struct CreatedTenant {
 }
 
 /// Creates a tenant with its default CZ market, the `<slug>.localhost` domain and the owner's
-/// staff membership, in one transaction. Superadmin only (CLI).
+/// staff membership, in one transaction. The CLI, and self-signup (`signup_user_id`).
 pub async fn create_tenant(db: &PgPool, t: &NewTenant<'_>) -> Result<CreatedTenant, Error> {
     validate_slug(t.slug)?;
     let name = t.name.trim();
@@ -124,15 +125,22 @@ pub async fn create_tenant(db: &PgPool, t: &NewTenant<'_>) -> Result<CreatedTena
 
     let mut tx = tenant_tx(db, tenant_id).await?;
     sqlx::query!(
-        "INSERT INTO platform.tenants (id, slug, name) VALUES ($1, $2, $3)",
+        "INSERT INTO platform.tenants (id, slug, name, signup_user_id) VALUES ($1, $2, $3, $4)",
         tenant_id,
         t.slug,
-        name
+        name,
+        t.signup_user_id
     )
     .execute(&mut *tx)
     .await
     .map_err(|e| {
-        if unique_violation(&e) {
+        let constraint = e.as_database_error().and_then(|d| d.constraint());
+        if constraint == Some("tenants_signup_user_id") {
+            Error::Conflict {
+                code: "store_limit_reached",
+                detail: "you already created a store".into(),
+            }
+        } else if unique_violation(&e) {
             Error::Conflict {
                 code: "already_exists",
                 detail: format!("tenant {} already exists", t.slug),

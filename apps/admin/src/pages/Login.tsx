@@ -1,6 +1,14 @@
 import { Alert, Button, Icon, linkClass, TextField } from "@platform/ui";
-import { useNavigate, useSearchParams } from "@solidjs/router";
-import { createEffect, createSignal, type JSX, Match, Show, Switch } from "solid-js";
+import { A, useNavigate, useSearchParams } from "@solidjs/router";
+import {
+  createEffect,
+  createResource,
+  createSignal,
+  type JSX,
+  Match,
+  Show,
+  Switch,
+} from "solid-js";
 import { t } from "../i18n/index.ts";
 import {
   requestPasswordReset,
@@ -10,6 +18,7 @@ import {
   status,
   verifyTotp,
 } from "../lib/session.ts";
+import { signupEnabled } from "../lib/signup.ts";
 
 /** Maps Better Auth error codes to messages (no account enumeration beyond Better Auth's). */
 export function signInError(code: string, httpStatus: number): string {
@@ -62,6 +71,7 @@ export function Login() {
     params.error ? t("auth.resetInvalid") : undefined,
   );
   const [pending, setPending] = createSignal<"password" | "magic" | "reset" | "code" | null>(null);
+  const [signupOn] = createResource(() => signupEnabled().catch(() => false));
 
   createEffect(() => {
     if (status() === "signed-in") navigate(safeNext(params.next), { replace: true });
@@ -197,6 +207,11 @@ export function Login() {
               {t("auth.forgot")}
             </button>
           </div>
+          <Show when={signupOn()}>
+            <A href="/signup" class={`self-center text-sm ${linkClass}`}>
+              {t("signup.link")}
+            </A>
+          </Show>
         </AuthLayout>
       </Match>
     </Switch>

@@ -29,8 +29,19 @@ pub struct StorefrontLimiter {
 
 impl StorefrontLimiter {
     pub fn new(per_second: u32, burst: u32) -> Self {
-        let quota = Quota::per_second(NonZeroU32::new(per_second).unwrap_or(NonZeroU32::MIN))
-            .allow_burst(NonZeroU32::new(burst).unwrap_or(NonZeroU32::MIN));
+        Self::with_quota(
+            Quota::per_second(NonZeroU32::new(per_second).unwrap_or(NonZeroU32::MIN))
+                .allow_burst(NonZeroU32::new(burst).unwrap_or(NonZeroU32::MIN)),
+        )
+    }
+
+    pub fn per_hour(n: u32) -> Self {
+        Self::with_quota(Quota::per_hour(
+            NonZeroU32::new(n).unwrap_or(NonZeroU32::MIN),
+        ))
+    }
+
+    fn with_quota(quota: Quota) -> Self {
         Self {
             limiter: RateLimiter::keyed(quota),
             clock: DefaultClock::default(),

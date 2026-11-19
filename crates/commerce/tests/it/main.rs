@@ -5,6 +5,7 @@ mod adtracking;
 mod ai;
 mod alt_texts;
 mod analytics;
+mod billing;
 mod catalog;
 mod checkout;
 mod checkout_access;

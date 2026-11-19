@@ -535,6 +535,7 @@ async fn storefront_tokens_resolve_their_tenant_only(db: PgPool) {
             name: "Gamma",
             owner_user_id: "u",
             owner_email: "u@example.test",
+            signup_user_id: None,
         },
     )
     .await

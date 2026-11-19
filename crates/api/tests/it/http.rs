@@ -90,6 +90,8 @@ fn state(db: PgPool) -> AppState {
         experiments: None,
         fetch: platform::http::SafeClient::new(Vec::<String>::new()).unwrap(),
         same_origin_ready: false,
+        self_signup: None,
+        billing: None,
     }
 }
 

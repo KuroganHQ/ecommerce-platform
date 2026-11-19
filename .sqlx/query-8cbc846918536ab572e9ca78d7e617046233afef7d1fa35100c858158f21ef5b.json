@@ -1,0 +1,64 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT t.plan, s.status AS \"status?\", s.current_period_end AS \"current_period_end?\",\n                  s.cancel_at_period_end AS \"cancel_at_period_end?\"\n           FROM platform.tenants t LEFT JOIN platform.subscriptions s ON s.tenant_id = t.id\n           WHERE t.id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "plan",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "platform.tenants",
+            "name": "plan"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "status?",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "platform.subscriptions",
+            "name": "status"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "current_period_end?",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "platform.subscriptions",
+            "name": "current_period_end"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "cancel_at_period_end?",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "platform.subscriptions",
+            "name": "cancel_at_period_end"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "8cbc846918536ab572e9ca78d7e617046233afef7d1fa35100c858158f21ef5b"
+}

@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE platform.subscriptions SET checkout_session_id = $2 WHERE tenant_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "4c1eb4097c0aff0115f4f6a5d96d29bd5ba547dd0b4430ab9642047a855a088c"
+}

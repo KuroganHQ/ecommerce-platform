@@ -6,6 +6,7 @@ pub mod admin;
 pub mod admin_ad_tracking;
 pub mod admin_ai;
 pub mod admin_analytics;
+pub mod admin_billing;
 pub mod admin_catalog;
 pub mod admin_content;
 pub mod admin_email;
@@ -37,6 +38,7 @@ pub use platform::edge;
 pub mod internal;
 pub mod rate_limit;
 pub mod seed;
+pub mod signup;
 pub mod storefront;
 pub mod storefront_search;
 pub mod webhooks;
@@ -113,6 +115,8 @@ pub struct AppState {
     pub experiments: Option<commerce::experiments::ExperimentKey>,
     pub fetch: platform::http::SafeClient,
     pub same_origin_ready: bool,
+    pub self_signup: Option<Arc<rate_limit::StorefrontLimiter>>,
+    pub billing: Option<commerce::billing::Billing>,
 }
 
 #[derive(Clone)]
@@ -150,6 +154,8 @@ pub struct MailEvents {
         (name = "analytics", description = "Admin API: the analytics dashboard"),
         (name = "webhooks-admin", description = "Admin API: outbound webhook subscriptions and deliveries"),
         (name = "ad-tracking", description = "Admin API: ad-platform forwarders (Meta, GA4, Google Ads, Sklik) and their delivery log"),
+        (name = "signup", description = "Merchant self-signup (SELF_SIGNUP): sign-in link, then the first store"),
+        (name = "billing", description = "Admin API: the store's subscription (Stripe Checkout and customer portal)"),
         (name = "platform", description = "Admin API for platform superadmins: the job queue"),
         (name = "marketing", description = "Admin API: newsletter subscribers, segments, campaigns"),
         (name = "portability", description = "Admin API: CSV imports, archived orders, data exports, GDPR access and erasure"),
@@ -231,6 +237,8 @@ fn documented_routes() -> (Router<AppState>, OpenApiSpec) {
         .merge(admin_insights::routes())
         .merge(admin_experiments::routes())
         .merge(admin_flows::routes())
+        .merge(admin_billing::routes())
+        .merge(signup::routes())
         .merge(storefront::routes())
         .merge(storefront_search::routes())
         .merge(internal::routes())

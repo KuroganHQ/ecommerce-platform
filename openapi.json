@@ -2024,6 +2024,231 @@
         ]
       }
     },
+    "/admin/v1/billing": {
+      "get": {
+        "tags": [
+          "billing"
+        ],
+        "summary": "The store's plan and subscription.",
+        "operationId": "overview",
+        "parameters": [
+          {
+            "name": "X-Tenant-Id",
+            "in": "header",
+            "description": "The tenant to act in; the caller must be a member.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BillingOverview"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "staff_jwt": []
+          }
+        ]
+      }
+    },
+    "/admin/v1/billing/checkout": {
+      "post": {
+        "tags": [
+          "billing"
+        ],
+        "summary": "A Stripe Checkout page subscribing the store to `plan` (login at most 15 minutes old).",
+        "operationId": "checkout",
+        "parameters": [
+          {
+            "name": "X-Tenant-Id",
+            "in": "header",
+            "description": "The tenant to act in; the caller must be a member.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CheckoutRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StripeRedirect"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "subscription_exists",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "unknown_plan",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "billing_not_configured",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "staff_jwt": []
+          }
+        ]
+      }
+    },
+    "/admin/v1/billing/portal": {
+      "post": {
+        "tags": [
+          "billing"
+        ],
+        "summary": "The Stripe customer portal: card, invoices, plan changes and cancellation (login at most\n15 minutes old).",
+        "operationId": "portal",
+        "parameters": [
+          {
+            "name": "X-Tenant-Id",
+            "in": "header",
+            "description": "The tenant to act in; the caller must be a member.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StripeRedirect"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "no_billing_account",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "billing_not_configured",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "staff_jwt": []
+          }
+        ]
+      }
+    },
     "/admin/v1/campaigns": {
       "get": {
         "tags": [
@@ -13542,6 +13767,87 @@
         ]
       }
     },
+    "/admin/v1/stores": {
+      "post": {
+        "tags": [
+          "signup"
+        ],
+        "summary": "Creates a store owned by the caller, like `api admin create-tenant`. One per user\n(`409 store_limit_reached`); platform superadmins are not limited. `404` unless\n`SELF_SIGNUP=1`.",
+        "operationId": "create_store",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewStore"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreatedStore"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "store_limit_reached | already_exists",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "staff_jwt": []
+          }
+        ]
+      }
+    },
     "/admin/v1/subscribers": {
       "get": {
         "tags": [
@@ -16305,6 +16611,101 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Readiness"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/signup": {
+      "get": {
+        "tags": [
+          "signup"
+        ],
+        "summary": "Whether self-signup is on. `404` when it is off.",
+        "operationId": "signup_status",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SignupStatus"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "signup"
+        ],
+        "summary": "Mails a sign-in link to the address, creating the (unverified) user when new. The answer is\nthe same for every valid address. Rate-limited per client IP (`429 rate_limited`).",
+        "operationId": "signup",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SignupRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SignupAccepted"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "invalid_email",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
                 }
               }
             }
@@ -24966,6 +25367,76 @@
           }
         }
       }
+    },
+    "/webhooks/stripe/billing": {
+      "post": {
+        "tags": [
+          "webhooks"
+        ],
+        "summary": "Stripe billing webhook (SHOP-45): subscription events of the platform's own account, signed\nwith `STRIPE_BILLING_WEBHOOK_SECRET`. Stored like Connect events and processed by\n`billing.stripe_event`. `404` when billing is not set up.",
+        "operationId": "stripe_billing_webhook",
+        "parameters": [
+          {
+            "name": "Stripe-Signature",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "A Stripe event",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "string"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Received"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_signature",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "invalid_event",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -27010,6 +27481,54 @@
           "ended"
         ]
       },
+      "BillingOverview": {
+        "type": "object",
+        "required": [
+          "configured",
+          "plan",
+          "cancel_at_period_end",
+          "subscription_open",
+          "plans"
+        ],
+        "properties": {
+          "cancel_at_period_end": {
+            "type": "boolean"
+          },
+          "configured": {
+            "type": "boolean",
+            "description": "`false`: billing is not set up (`BILLING_PLANS`, Stripe); checkout and portal answer 503."
+          },
+          "current_period_end": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "plan": {
+            "type": "string",
+            "description": "The store's current plan (`standard` without a paid subscription)."
+          },
+          "plans": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Plans the store can choose."
+          },
+          "status": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Stripe's subscription status (`active`, `past_due`, `canceled`, ...); `null` before the\nfirst subscription."
+          },
+          "subscription_open": {
+            "type": "boolean",
+            "description": "The subscription still exists: plan changes and cancellation go through the portal, and\ncheckout answers `409 subscription_exists`."
+          }
+        }
+      },
       "Block": {
         "oneOf": [
           {
@@ -28612,6 +29131,18 @@
           }
         }
       },
+      "CheckoutRequest": {
+        "type": "object",
+        "required": [
+          "plan"
+        ],
+        "properties": {
+          "plan": {
+            "type": "string",
+            "description": "One of the configured plans."
+          }
+        }
+      },
       "CheckoutStart": {
         "type": "object",
         "properties": {
@@ -29820,6 +30351,23 @@
                 "type": "null"
               }
             ]
+          }
+        }
+      },
+      "CreatedStore": {
+        "type": "object",
+        "required": [
+          "tenant_id",
+          "hostname"
+        ],
+        "properties": {
+          "hostname": {
+            "type": "string"
+          },
+          "tenant_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Send as `X-Tenant-Id` to act in the new store."
           }
         }
       },
@@ -35023,6 +35571,22 @@
           }
         },
         "additionalProperties": false
+      },
+      "NewStore": {
+        "type": "object",
+        "required": [
+          "name",
+          "slug"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string",
+            "description": "The store's subdomain: 1-63 lowercase letters, digits or single inner hyphens."
+          }
+        }
       },
       "NewSubscription": {
         "type": "object",
@@ -40661,6 +41225,40 @@
           }
         }
       },
+      "SignupAccepted": {
+        "type": "object",
+        "required": [
+          "accepted"
+        ],
+        "properties": {
+          "accepted": {
+            "type": "boolean",
+            "description": "Always `true`: whether the address already had an account is not revealed."
+          }
+        }
+      },
+      "SignupRequest": {
+        "type": "object",
+        "required": [
+          "email"
+        ],
+        "properties": {
+          "email": {
+            "type": "string"
+          }
+        }
+      },
+      "SignupStatus": {
+        "type": "object",
+        "required": [
+          "enabled"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          }
+        }
+      },
       "SimulateAccountInput": {
         "type": "object",
         "required": [
@@ -41049,6 +41647,18 @@
           "test",
           "simulator"
         ]
+      },
+      "StripeRedirect": {
+        "type": "object",
+        "required": [
+          "url"
+        ],
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "The Stripe-hosted page to send the owner to."
+          }
+        }
       },
       "StripeStatus": {
         "type": "object",
@@ -42840,6 +43450,14 @@
     {
       "name": "ad-tracking",
       "description": "Admin API: ad-platform forwarders (Meta, GA4, Google Ads, Sklik) and their delivery log"
+    },
+    {
+      "name": "signup",
+      "description": "Merchant self-signup (SELF_SIGNUP): sign-in link, then the first store"
+    },
+    {
+      "name": "billing",
+      "description": "Admin API: the store's subscription (Stripe Checkout and customer portal)"
     },
     {
       "name": "platform",

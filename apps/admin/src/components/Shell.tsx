@@ -13,12 +13,25 @@ import {
   TooltipButton,
 } from "@platform/ui";
 import { A, useLocation, useNavigate } from "@solidjs/router";
-import { createEffect, createSignal, For, type JSX, Match, on, Show, Switch } from "solid-js";
+import {
+  createEffect,
+  createResource,
+  createSignal,
+  For,
+  type JSX,
+  Match,
+  on,
+  Show,
+  Switch,
+} from "solid-js";
 import { LOCALES, type Locale, locale, setLocale, t } from "../i18n/index.ts";
 import { queryClient, type Role, setTenantId } from "../lib/api.ts";
 import { useMembership } from "../lib/me.ts";
 import { claims, signOut } from "../lib/session.ts";
+import { signupEnabled } from "../lib/signup.ts";
 import { setTheme, theme } from "../lib/theme.ts";
+import { AuthLayout } from "../pages/Login.tsx";
+import { CreateStore } from "./CreateStore.tsx";
 import { QueryState } from "./Page.tsx";
 
 interface NavItem {
@@ -123,6 +136,7 @@ const groups: { icon: IconName; label: () => string; items: NavItem[] }[] = [
       { href: "/settings/email-branding", label: () => t("nav.emailBranding"), min: "staff" },
       { href: "/settings/emails", label: () => t("nav.emails"), min: "admin" },
       { href: "/staff", label: () => t("nav.staff"), min: "admin" },
+      { href: "/billing", label: () => t("billing.title"), min: "owner" },
       { href: "/audit-log", label: () => t("nav.auditLog"), min: "admin" },
       { href: "/settings/webhooks", label: () => t("nav.webhooks"), min: "admin" },
       { href: "/settings/ad-tracking", label: () => t("nav.adTracking"), min: "admin" },
@@ -174,6 +188,10 @@ const activeClass =
 
 export function Shell(props: { children: JSX.Element }) {
   const { me, current, can } = useMembership();
+  const [signupOn] = createResource(
+    () => me.data?.memberships.length === 0 || undefined,
+    () => signupEnabled().catch(() => false),
+  );
   const navigate = useNavigate();
   const location = useLocation();
   const [drawerOpen, setDrawerOpen] = createSignal(false);
@@ -279,7 +297,15 @@ export function Shell(props: { children: JSX.Element }) {
     <QueryState query={me}>
       {(data) => (
         <Switch>
-          <Match when={data.memberships.length === 0}>
+          <Match when={data.memberships.length === 0 && signupOn()}>
+            <AuthLayout title={t("signup.storeTitle")} lead={t("signup.storeLead")}>
+              <CreateStore />
+              <Button category="tertiary" onClick={logout}>
+                {t("auth.signOut")}
+              </Button>
+            </AuthLayout>
+          </Match>
+          <Match when={data.memberships.length === 0 && signupOn.state !== "pending"}>
             <main class="mx-auto max-w-md p-8">
               <EmptyState
                 title={t("app.noAccessTitle")}

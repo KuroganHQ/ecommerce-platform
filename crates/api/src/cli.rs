@@ -257,6 +257,7 @@ async fn create_tenant(
             name,
             owner_user_id: &user_id,
             owner_email,
+            signup_user_id: None,
         },
     )
     .await?;

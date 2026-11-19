@@ -101,6 +101,7 @@ async fn main() -> anyhow::Result<()> {
         theme_builder: theme_builder()?,
         fulfillment: Some(fulfillment(env, &ops)?),
         ads,
+        billing: billing(env)?,
     };
     tracing::info!(provider = extra.ai.provider(), "AI helpers");
 
@@ -178,6 +179,16 @@ fn fulfillment(
             bin: c.typst_bin.into(),
         },
     })
+}
+
+fn billing(env: platform::config::AppEnv) -> anyhow::Result<Option<commerce::billing::Billing>> {
+    let stripe = platform::config::PaymentsConfig::from_env(env)?
+        .stripe
+        .map(|cfg| commerce::payments::stripe::Stripe::new(&cfg, reqwest::Client::new()));
+    Ok(commerce::billing::Billing::new(
+        stripe.as_ref(),
+        &platform::config::BillingConfig::from_env()?,
+    ))
 }
 
 /// The Fio API poller when `SECRETS_KEY` is set (stored tokens are encrypted with it).

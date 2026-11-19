@@ -15,7 +15,9 @@
 http://api.localhost {
 	respond /internal/* "not found" 404
 	respond /storefront/* "not found" 404
-	reverse_proxy api:8000
+	reverse_proxy api:8000 {
+		header_up X-Client-Ip {remote_host}
+	}
 }
 
 # Better Auth rate-limits per client IP (WP12): Caddy overwrites X-Real-IP with the peer

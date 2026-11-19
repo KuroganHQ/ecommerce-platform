@@ -14,6 +14,7 @@ fn owner(slug: &'static str) -> NewTenant<'static> {
         name: "Demo shop",
         owner_user_id: "user-owner",
         owner_email: "owner@example.test",
+        signup_user_id: None,
     }
 }
 

@@ -41,6 +41,8 @@ pub enum Error {
     TooManyRequests { code: &'static str },
     #[error("service unavailable: {0}")]
     Unavailable(String),
+    #[error("not configured: {code}")]
+    NotConfigured { code: &'static str },
     #[error(transparent)]
     Database(#[from] sqlx::Error),
     #[error(transparent)]
@@ -62,7 +64,7 @@ impl Error {
             Self::Validation { .. } => StatusCode::UNPROCESSABLE_ENTITY,
             Self::PaymentRequired { .. } => StatusCode::PAYMENT_REQUIRED,
             Self::TooManyRequests { .. } => StatusCode::TOO_MANY_REQUESTS,
-            Self::Unavailable(_) => StatusCode::SERVICE_UNAVAILABLE,
+            Self::Unavailable(_) | Self::NotConfigured { .. } => StatusCode::SERVICE_UNAVAILABLE,
             Self::Database(_) | Self::Storage(_) | Self::Internal(_) => {
                 StatusCode::INTERNAL_SERVER_ERROR
             }
@@ -78,6 +80,7 @@ impl Error {
             | Self::Unauthorized { code }
             | Self::Forbidden { code }
             | Self::TooManyRequests { code }
+            | Self::NotConfigured { code }
             | Self::Conflict { code, .. }
             | Self::PaymentRequired { code, .. }
             | Self::Validation { code, .. } => code,
@@ -94,7 +97,8 @@ impl Error {
             | Self::PayloadTooLarge
             | Self::Unauthorized { .. }
             | Self::Forbidden { .. }
-            | Self::TooManyRequests { .. } => None,
+            | Self::TooManyRequests { .. }
+            | Self::NotConfigured { .. } => None,
             Self::BadRequest { detail, .. }
             | Self::Conflict { detail, .. }
             | Self::PaymentRequired { detail, .. }

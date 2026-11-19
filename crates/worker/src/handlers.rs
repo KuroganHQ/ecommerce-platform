@@ -65,6 +65,7 @@ pub struct Extra {
     pub theme_builder: Option<ThemeBuilder>,
     /// WP12: carriers (tracking), the ČNB client and the Typst renderer.
     pub fulfillment: Option<Fulfillment>,
+    pub billing: Option<commerce::billing::Billing>,
 }
 
 /// Hands revisions to the theme builder (WP23). Not `Debug`: it holds the service token.
@@ -107,6 +108,7 @@ impl Extra {
             theme_builder: None,
             fulfillment: None,
             ads: None,
+            billing: None,
         })
     }
 }
@@ -166,6 +168,7 @@ pub fn all(
     let campaign_urls = e4.urls.clone();
     let flow_event_urls = campaign_urls.clone();
     let flow_tick_urls = campaign_urls.clone();
+    let billing = e4.billing.clone();
     Handlers::default()
         .register(EDGE_PURGE, move |_ctx, job| {
             edge_purge(job, e1.edge.clone())
@@ -245,6 +248,9 @@ pub fn all(
             payments_expire(ctx, job, urls4.clone())
         })
         .register(stripe::EVENT_JOB, provider_event)
+        .register(commerce::billing::EVENT_JOB, move |ctx, job| {
+            billing_event(ctx, job, billing.clone())
+        })
         .register(PAYMENTS_REMIND, move |ctx, job| {
             payments_remind(ctx, job, urls.clone())
         })
@@ -379,6 +385,28 @@ async fn provider_event(ctx: Ctx, job: Job) -> Result<(), JobError> {
     match stripe::process_event(&ctx.db, id).await {
         Ok(outcome) => {
             tracing::info!(event = %id, ?outcome, "provider event processed");
+            Ok(())
+        }
+        Err(platform::Error::NotFound) => Err(JobError::Permanent("unknown event".into())),
+        Err(e) => Err(JobError::Retry(e.to_string())),
+    }
+}
+
+async fn billing_event(
+    ctx: Ctx,
+    job: Job,
+    billing: Option<commerce::billing::Billing>,
+) -> Result<(), JobError> {
+    let billing = billing.ok_or_else(|| JobError::Retry("billing is not configured".into()))?;
+    let id = job
+        .payload
+        .get("id")
+        .and_then(serde_json::Value::as_str)
+        .and_then(|s| s.parse::<Uuid>().ok())
+        .ok_or_else(|| JobError::Permanent("billing event job without id".into()))?;
+    match commerce::billing::process_event(&ctx.db, &billing, id).await {
+        Ok(outcome) => {
+            tracing::info!(event = %id, ?outcome, "billing event processed");
             Ok(())
         }
         Err(platform::Error::NotFound) => Err(JobError::Permanent("unknown event".into())),
