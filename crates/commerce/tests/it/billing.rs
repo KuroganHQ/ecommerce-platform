@@ -1,29 +1,88 @@
 use std::sync::Arc;
 
 use axum::extract::Path;
+use axum::routing::{get, post};
 use chrono::Utc;
 use commerce::billing::{self, Billing};
 use commerce::payments::stripe::{Processed, Stripe};
 use platform::config::{BillingConfig, StripeConfig, StripeMode};
 use serde_json::{Value, json};
 use sqlx::PgPool;
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock, oneshot};
 use uuid::Uuid;
 
 const SECRET: &str = "whsec_billing_test_0123456789";
 
-async fn fake_stripe(subscription: Arc<RwLock<Value>>) -> String {
-    let router = axum::Router::new().route(
-        "/v1/subscriptions/{id}",
-        axum::routing::get(move |Path(id): Path<String>| {
-            let sub = subscription.clone();
-            async move {
-                let mut body = sub.read().await.clone();
-                body["id"] = json!(id);
-                axum::Json(body)
-            }
-        }),
-    );
+/// Stripe's subscription retrieval and Checkout Sessions, as the test sets them.
+#[derive(Default)]
+struct FakeStripe {
+    subscription: RwLock<Value>,
+    /// Status of `cs_<index>`.
+    sessions: RwLock<Vec<&'static str>>,
+    /// Holds the next subscription read: sends its snapshot, then waits for the release.
+    held_read: Mutex<Option<(oneshot::Sender<Value>, oneshot::Receiver<()>)>>,
+}
+
+fn session_index(id: &str) -> usize {
+    id.trim_start_matches("cs_").parse().unwrap()
+}
+
+async fn fake_stripe(fake: Arc<FakeStripe>) -> String {
+    let (f1, f2, f3, f4) = (fake.clone(), fake.clone(), fake.clone(), fake);
+    let router = axum::Router::new()
+        .route(
+            "/v1/subscriptions/{id}",
+            get(move |Path(id): Path<String>| {
+                let fake = f1.clone();
+                async move {
+                    let mut body = fake.subscription.read().await.clone();
+                    body["id"] = json!(id);
+                    let held = fake.held_read.lock().await.take();
+                    if let Some((snapshot, release)) = held {
+                        snapshot.send(body.clone()).unwrap();
+                        release.await.unwrap();
+                    }
+                    axum::Json(body)
+                }
+            }),
+        )
+        .route(
+            "/v1/checkout/sessions",
+            post(move || {
+                let fake = f2.clone();
+                async move {
+                    let mut sessions = fake.sessions.write().await;
+                    sessions.push("open");
+                    let id = format!("cs_{}", sessions.len() - 1);
+                    axum::Json(
+                        json!({ "id": id, "url": format!("https://checkout.stripe.test/{id}") }),
+                    )
+                }
+            }),
+        )
+        .route(
+            "/v1/checkout/sessions/{id}",
+            get(move |Path(id): Path<String>| {
+                let fake = f3.clone();
+                async move {
+                    let status = fake.sessions.read().await[session_index(&id)];
+                    axum::Json(json!({ "id": id, "status": status }))
+                }
+            }),
+        )
+        .route(
+            "/v1/checkout/sessions/{id}/expire",
+            post(move |Path(id): Path<String>| {
+                let fake = f4.clone();
+                async move {
+                    let mut sessions = fake.sessions.write().await;
+                    let status = &mut sessions[session_index(&id)];
+                    assert_eq!(*status, "open", "only an open session can be expired");
+                    *status = "expired";
+                    axum::Json(json!({ "id": id, "status": "expired" }))
+                }
+            }),
+        );
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("http://{}", listener.local_addr().unwrap());
     tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
@@ -48,14 +107,14 @@ struct Fixture {
     owner: PgPool,
     billing: Billing,
     signer: Stripe,
-    subscription: Arc<RwLock<Value>>,
+    stripe: Arc<FakeStripe>,
     tenant: Uuid,
 }
 
 async fn fixture(owner: &PgPool) -> Fixture {
     let db = testkit::runtime_pool(owner, 4).await;
-    let subscription = Arc::new(RwLock::new(Value::Null));
-    let api = fake_stripe(subscription.clone()).await;
+    let fake = Arc::new(FakeStripe::default());
+    let api = fake_stripe(fake.clone()).await;
     let billing = Billing::new(
         Some(&stripe(&api, "whsec_connect_0123456789")),
         &BillingConfig {
@@ -77,14 +136,14 @@ async fn fixture(owner: &PgPool) -> Fixture {
         owner: owner.clone(),
         billing,
         signer: stripe(&api, SECRET),
-        subscription,
+        stripe: fake,
         tenant,
     }
 }
 
 impl Fixture {
     async fn set_subscription(&self, status: &str, customer: &str) {
-        *self.subscription.write().await = json!({
+        *self.stripe.subscription.write().await = json!({
             "object": "subscription",
             "customer": customer,
             "status": status,
@@ -94,6 +153,14 @@ impl Fixture {
     }
 
     async fn deliver(&self, event_id: &str, kind: &str, object: Value) -> Processed {
+        let id = self.store(event_id, kind, object).await;
+        billing::process_event(&self.db, &self.billing, id)
+            .await
+            .unwrap()
+    }
+
+    /// Receives an event through the webhook path without processing it.
+    async fn store(&self, event_id: &str, kind: &str, object: Value) -> Uuid {
         let raw = json!({ "id": event_id, "type": kind, "livemode": false, "data": { "object": object } })
             .to_string();
         let sig = self.signer.sign(raw.as_bytes(), Utc::now()).unwrap();
@@ -117,9 +184,7 @@ impl Fixture {
         .await
         .unwrap();
         assert_eq!(job, 1, "the billing job is enqueued");
-        billing::process_event(&self.db, &self.billing, id)
-            .await
-            .unwrap()
+        id
     }
 
     async fn plan(&self) -> (String, Option<String>) {
@@ -202,4 +267,46 @@ async fn billing_events_need_the_billing_secret(db: PgPool) {
         .await
         .unwrap_err();
     assert_eq!(err.code(), "invalid_signature");
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn overlapping_events_keep_the_newest_stripe_state(db: PgPool) {
+    let f = Arc::new(fixture(&db).await);
+    let object = json!({ "id": "sub_1", "customer": "cus_ours" });
+    let older = f
+        .store("evt_older", "customer.subscription.updated", object.clone())
+        .await;
+    let newer = f
+        .store("evt_newer", "customer.subscription.updated", object)
+        .await;
+
+    f.set_subscription("active", "cus_ours").await;
+    let (snapshot_tx, snapshot) = oneshot::channel();
+    let (release, release_rx) = oneshot::channel();
+    *f.stripe.held_read.lock().await = Some((snapshot_tx, release_rx));
+    let first = {
+        let f = f.clone();
+        tokio::spawn(async move { billing::process_event(&f.db, &f.billing, older).await })
+    };
+    assert_eq!(
+        snapshot.await.unwrap()["status"],
+        "active",
+        "the older job read Stripe"
+    );
+
+    // Stripe moves on; a second job for the same store starts while the first one is in flight.
+    f.set_subscription("canceled", "cus_ours").await;
+    let mut second = {
+        let f = f.clone();
+        tokio::spawn(async move { billing::process_event(&f.db, &f.billing, newer).await })
+    };
+    let early = tokio::time::timeout(std::time::Duration::from_millis(500), &mut second).await;
+    release.send(()).unwrap();
+    first.await.unwrap().unwrap();
+    match early {
+        Ok(done) => done.unwrap().unwrap(),
+        Err(_) => second.await.unwrap().unwrap(),
+    };
+
+    assert_eq!(f.plan().await, ("standard".into(), Some("canceled".into())));
 }

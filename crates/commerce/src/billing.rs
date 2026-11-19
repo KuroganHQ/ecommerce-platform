@@ -272,12 +272,13 @@ fn subscription_ref<'a>(kind: &str, object: &'a Value) -> Option<(&'a str, &'a s
 }
 
 pub async fn process_event(db: &PgPool, billing: &Billing, id: Uuid) -> Result<Processed, Error> {
+    let mut tx = db.begin().await?;
     let ev = sqlx::query!(
         "SELECT type, payload, processed_at, outcome, detail
-         FROM platform.provider_events WHERE id = $1",
+         FROM platform.provider_events WHERE id = $1 FOR UPDATE",
         id
     )
-    .fetch_optional(db)
+    .fetch_optional(&mut *tx)
     .await?
     .ok_or(Error::NotFound)?;
     if ev.processed_at.is_some() {
@@ -289,24 +290,53 @@ pub async fn process_event(db: &PgPool, billing: &Billing, id: Uuid) -> Result<P
         });
     }
     let object = ev.payload.pointer("/data/object").unwrap_or(&Value::Null);
-    let Some((subscription_id, customer)) = subscription_ref(&ev.r#type, object) else {
-        return done(
-            db,
-            id,
+    let (tenant_id, outcome) = match subscription_ref(&ev.r#type, object) {
+        None => (
             None,
             Processed::Ignored(format!("unhandled type {}", ev.r#type)),
-        )
-        .await;
+        ),
+        Some((subscription_id, customer)) => {
+            // The store's row stays locked through the Stripe read, so overlapping events
+            // commit in the order they read Stripe.
+            let current = sqlx::query!(
+                "SELECT tenant_id, stripe_subscription_id, status FROM platform.subscriptions
+                 WHERE stripe_customer_id = $1 FOR UPDATE",
+                customer
+            )
+            .fetch_optional(&mut *tx)
+            .await?;
+            match current {
+                None => (None, Processed::Ignored("unknown customer".into())),
+                Some(current) => {
+                    let outcome = apply_subscription(
+                        &mut tx,
+                        billing,
+                        current.tenant_id,
+                        subscription_id,
+                        customer,
+                        current.stripe_subscription_id.as_deref(),
+                        current.status.as_deref(),
+                    )
+                    .await?;
+                    (Some(current.tenant_id), outcome)
+                }
+            }
+        }
     };
-    let tenant = sqlx::query_scalar!(
-        "SELECT tenant_id FROM platform.subscriptions WHERE stripe_customer_id = $1",
-        customer
-    )
-    .fetch_optional(db)
-    .await?;
-    let Some(tenant_id) = tenant else {
-        return done(db, id, None, Processed::Ignored("unknown customer".into())).await;
-    };
+    stripe::finish(&mut tx, id, tenant_id, &outcome).await?;
+    tx.commit().await?;
+    Ok(outcome)
+}
+
+async fn apply_subscription(
+    tx: &mut sqlx::PgConnection,
+    billing: &Billing,
+    tenant_id: Uuid,
+    subscription_id: &str,
+    customer: &str,
+    stored_subscription: Option<&str>,
+    stored_status: Option<&str>,
+) -> Result<Processed, Error> {
     let sub = billing
         .stripe
         .call(
@@ -317,17 +347,15 @@ pub async fn process_event(db: &PgPool, billing: &Billing, id: Uuid) -> Result<P
             &[],
         )
         .await?;
-    let field = |name| sub.get(name).and_then(Value::as_str);
-    if field("customer") != Some(customer) {
-        return done(
-            db,
-            id,
-            Some(tenant_id),
-            Processed::Rejected("customer mismatch".into()),
-        )
-        .await;
+    if sub.get("customer").and_then(Value::as_str) != Some(customer) {
+        return Ok(Processed::Rejected("customer mismatch".into()));
     }
     let status = Stripe::str_field(&sub, "status")?;
+    let replaced = stored_subscription.is_some_and(|s| s != subscription_id);
+    let stored_open = stored_status.is_some_and(|s| OPEN.contains(&s));
+    if replaced && stored_open && !OPEN.contains(&status.as_str()) {
+        return Ok(Processed::Ignored("an older subscription".into()));
+    }
     let price = sub
         .pointer("/items/data/0/price/id")
         .and_then(Value::as_str);
@@ -345,74 +373,30 @@ pub async fn process_event(db: &PgPool, billing: &Billing, id: Uuid) -> Result<P
         .get("cancel_at_period_end")
         .and_then(Value::as_bool)
         .unwrap_or(false);
-
-    let mut tx = db.begin().await?;
-    let open = sqlx::query_scalar!(
-        r#"SELECT processed_at IS NULL AS "open!" FROM platform.provider_events
-           WHERE id = $1 FOR UPDATE"#,
-        id
+    sqlx::query!(
+        "UPDATE platform.subscriptions SET stripe_subscription_id = $2, price_id = $3,
+             plan = $4, status = $5, current_period_end = $6, cancel_at_period_end = $7,
+             updated_at = now()
+         WHERE tenant_id = $1",
+        tenant_id,
+        subscription_id,
+        price,
+        plan,
+        status,
+        period_end,
+        cancel_at_period_end
     )
-    .fetch_one(&mut *tx)
+    .execute(&mut *tx)
     .await?;
-    if !open {
-        tx.commit().await?;
-        return Box::pin(process_event(db, billing, id)).await;
-    }
-    let current = sqlx::query!(
-        "SELECT stripe_subscription_id, status FROM platform.subscriptions
-         WHERE tenant_id = $1 FOR UPDATE",
-        tenant_id
+    let effective = plan_for(&status, plan);
+    sqlx::query!(
+        "UPDATE platform.tenants SET plan = $2 WHERE id = $1",
+        tenant_id,
+        effective
     )
-    .fetch_one(&mut *tx)
+    .execute(&mut *tx)
     .await?;
-    let replaced = current
-        .stripe_subscription_id
-        .as_deref()
-        .is_some_and(|s| s != subscription_id);
-    let current_open = current.status.as_deref().is_some_and(|s| OPEN.contains(&s));
-    let outcome = if replaced && current_open && !OPEN.contains(&status.as_str()) {
-        Processed::Ignored("an older subscription".into())
-    } else {
-        sqlx::query!(
-            "UPDATE platform.subscriptions SET stripe_subscription_id = $2, price_id = $3,
-                 plan = $4, status = $5, current_period_end = $6, cancel_at_period_end = $7,
-                 updated_at = now()
-             WHERE tenant_id = $1",
-            tenant_id,
-            subscription_id,
-            price,
-            plan,
-            status,
-            period_end,
-            cancel_at_period_end
-        )
-        .execute(&mut *tx)
-        .await?;
-        let effective = plan_for(&status, plan);
-        sqlx::query!(
-            "UPDATE platform.tenants SET plan = $2 WHERE id = $1",
-            tenant_id,
-            effective
-        )
-        .execute(&mut *tx)
-        .await?;
-        Processed::Applied(format!("{status}: plan {effective}"))
-    };
-    stripe::finish(&mut tx, id, Some(tenant_id), &outcome).await?;
-    tx.commit().await?;
-    Ok(outcome)
-}
-
-async fn done(
-    db: &PgPool,
-    id: Uuid,
-    tenant_id: Option<Uuid>,
-    outcome: Processed,
-) -> Result<Processed, Error> {
-    let mut tx = db.begin().await?;
-    stripe::finish(&mut tx, id, tenant_id, &outcome).await?;
-    tx.commit().await?;
-    Ok(outcome)
+    Ok(Processed::Applied(format!("{status}: plan {effective}")))
 }
 
 #[cfg(test)]
